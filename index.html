@@ -168,7 +168,7 @@
                     </button>
                     <button onclick="exportSGA(); document.getElementById('export-dropdown').classList.add('hidden');" class="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors">
                         <div class="font-medium text-sm text-blue-700">Exportar para SGA</div>
-                        <div class="text-xs text-gray-500 mt-0.5">Seatmanifest con IDs num&eacute;ricos secuenciales</div>
+                        <div class="text-xs text-gray-500 mt-0.5">JSON Seatmanifest (Sectors / Gates / Areas / Seats)</div>
                     </button>
                 </div>
             </div>
@@ -1172,66 +1172,115 @@
             link.href = url; link.download = "stadium_map_export.csv"; link.click();
         }
 
-        // --- Export SGA (Seatmanifest format) ---
+        // --- Export SGA (Seatmanifest JSON format) ---
         function exportSGA() {
-            const escape = (val) => {
-                if (val === null || val === undefined) return '';
-                const str = String(val);
-                if (str.includes(',') || str.includes('"') || str.includes('\n')) return `"${str.replace(/"/g, '""')}"`;
-                return str;
+            const stadiumName = (prompt('Nombre del estadio:', 'Estadio') || 'Estadio').trim();
+            const venueId = (prompt('MapGeneratorVenueId (opcional):', '') || '').trim();
+            const mapId = (prompt('MapGeneratorMapId:', 'main') || 'main').trim();
+
+            const isUuid = (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+            const ensureUuid = (v) => isUuid(v) ? v : generateUUID();
+
+            // Stable id remap: keep UUIDs as-is; generate new UUIDs for non-UUID ids and reuse them consistently.
+            const idRemap = new Map();
+            const remapId = (raw) => {
+                if (!raw) return generateUUID();
+                if (idRemap.has(raw)) return idRemap.get(raw);
+                const out = ensureUuid(raw);
+                idRemap.set(raw, out);
+                return out;
             };
 
-            // Build sequential ID maps
-            const sectorIdMap = new Map();
-            let sectorCounter = 0;
-            AppState.sectors.forEach(s => {
-                sectorCounter++;
-                sectorIdMap.set(s.id, sectorCounter);
-            });
+            // Parse "puerta" free-text into individual gate names. Splits on commas/semicolons and " y ".
+            const parseGates = (puertaStr) => {
+                if (!puertaStr) return [];
+                return String(puertaStr)
+                    .split(/[,;]/)
+                    .flatMap(p => p.split(/\s+y\s+/i))
+                    .map(s => s.trim())
+                    .filter(s => s.length > 0);
+            };
 
-            const areaIdMap = new Map();
-            let areaCounter = 0;
-            AppState.areas.forEach(a => {
-                areaCounter++;
-                areaIdMap.set(a.id, areaCounter);
-            });
+            // Sectors
+            const Sectors = AppState.sectors.map((s, i) => ({
+                Id: remapId(s.id),
+                Name: s.title || '',
+                SectorPublicId: String(i + 1)
+            }));
 
-            const headers = ['IDZONA','ZONA','ZONA_ABREVIADO','PUERTA','IDASIENTO','POS_FILA','POS_ASIENTO','FILA','ASIENTO','SLOT','ESTADO_AVET','PATH_DESC','IDEVENT','IDGRUPOZONA','GRUPOZONA','GATES'];
-            let csvContent = headers.join(',') + "\n";
-
-            let seatCounter = 0;
+            // Gates: dedupe by name across all areas, collect AreaIds
+            const gatesByName = new Map();
             AppState.areas.forEach(area => {
-                const areaSeats = AppState.seats.filter(s => s.areaId === area.id);
-                const parentSector = AppState.sectors.find(s => s.id === area.sectorId);
-                const numericZonaId = areaIdMap.get(area.id) || 0;
-                const numericGrupoId = sectorIdMap.get(area.sectorId) || 0;
+                const remappedAreaId = remapId(area.id);
+                parseGates(area.puerta).forEach(name => {
+                    if (!gatesByName.has(name)) {
+                        gatesByName.set(name, { Id: generateUUID(), Name: name, AreaIds: [] });
+                    }
+                    gatesByName.get(name).AreaIds.push(remappedAreaId);
+                });
+            });
+            const Gates = Array.from(gatesByName.values());
 
-                areaSeats.forEach(seat => {
-                    seatCounter++;
-                    csvContent += [
-                        numericZonaId,
-                        escape(area.title),
-                        escape(area.code),
-                        escape(area.puerta || ''),
-                        seatCounter,
-                        seat.rowPos,
-                        seat.seatPos,
-                        escape(seat.rowNum),
-                        escape(seat.seatNum),
-                        'NULL',
-                        'L',
-                        '',
-                        0,
-                        numericGrupoId,
-                        escape(parentSector?.title || ''),
-                        escape(area.puerta || '')
-                    ].join(',') + "\n";
+            // Reverse lookup area -> gate ids (preserving original gate order)
+            const areaToGateIds = new Map();
+            Gates.forEach(g => {
+                g.AreaIds.forEach(aid => {
+                    if (!areaToGateIds.has(aid)) areaToGateIds.set(aid, []);
+                    areaToGateIds.get(aid).push(g.Id);
                 });
             });
 
-            const url = URL.createObjectURL(new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }));
+            // Areas with nested seats
+            let seatPublicCounter = 0;
+            const Areas = AppState.areas.map((area, idx) => {
+                const remappedAreaId = remapId(area.id);
+                const areaSeats = AppState.seats
+                    .filter(s => s.areaId === area.id)
+                    .map(seat => {
+                        seatPublicCounter++;
+                        return {
+                            Id: remapId(seat.seatId),
+                            RowPosition: Number(seat.rowPos) || 0,
+                            SeatPosition: Number(seat.seatPos) || 0,
+                            SeatPublicId: String(seatPublicCounter),
+                            RowNumber: String(seat.rowNum ?? ''),
+                            SeatNumber: String(seat.seatNum ?? ''),
+                            AreaId: remappedAreaId
+                        };
+                    });
+                return {
+                    Id: remappedAreaId,
+                    Name: area.title || '',
+                    AreaPublicId: String(idx + 1),
+                    AreaCode: area.code || area.title || '',
+                    GateIds: areaToGateIds.get(remappedAreaId) || [],
+                    SectorId: remapId(area.sectorId),
+                    Seats: areaSeats
+                };
+            });
+
+            const out = {
+                Id: generateUUID(),
+                Name: stadiumName,
+                MapGeneratorVenueId: venueId,
+                MapGeneratorMapId: mapId,
+                Gates,
+                Areas,
+                Sectors
+            };
+
+            // Match reference format: minified JSON with non-ASCII chars escaped as \uXXXX
+            const json = JSON.stringify(out).replace(/[\u0080-\uFFFF]/g, c =>
+                '\\u' + ('0000' + c.charCodeAt(0).toString(16).toUpperCase()).slice(-4)
+            );
+
+            const safeName = (stadiumName || 'estadio').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_');
+            const url = URL.createObjectURL(new Blob([json], { type: 'application/json;charset=utf-8;' }));
             const link = document.createElement("a");
-            link.href = url; link.download = "seatmanifest_export.csv"; link.click();
+            link.href = url;
+            link.download = `${safeName}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
         }
 
         // Close export dropdown when clicking outside
