@@ -93,7 +93,7 @@
         
         #selection-marquee { fill: rgba(59, 130, 246, 0.2); stroke: #2563eb; stroke-width: 1; stroke-dasharray: 4, 4; pointer-events: none; display: none; }
         #selection-marquee.active { display: block; }
-        
+
         button:disabled { opacity: 0.5; cursor: not-allowed; }
 
         /* Auxiliares para el grid */
@@ -101,6 +101,29 @@
             display: flex; align-items: center; justify-content: center;
             font-size: 10px; font-weight: bold; color: #9ca3af;
         }
+
+        /* MODO DIVISIÓN */
+        .grid-header-col.divide-split {
+            background-color: #fee2e2; color: #dc2626; font-weight: bold;
+            position: relative; border-radius: 3px;
+        }
+        .grid-header-col.divide-split::before {
+            content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+            width: 3px; background-color: #ef4444; border-radius: 2px 0 0 2px;
+        }
+        .grid-header-row.divide-split {
+            background-color: #fee2e2; color: #dc2626; font-weight: bold;
+            position: relative; border-radius: 3px;
+        }
+        .grid-header-row.divide-split::after {
+            content: ''; position: absolute; left: 0; right: 0; top: 0;
+            height: 3px; background-color: #ef4444; border-radius: 2px 2px 0 0;
+        }
+        #btn-divide-area.divide-active {
+            background-color: #fef3c7 !important; border-color: #f59e0b !important;
+            color: #92400e !important;
+        }
+        .seat-cell.divide-mode { opacity: 0.6; cursor: default !important; pointer-events: none; }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800 h-screen flex flex-col font-sans">
@@ -409,7 +432,13 @@
                             <button onclick="expandGrid('right')" class="p-1 hover:bg-blue-50 text-blue-600 rounded"><i data-lucide="arrow-right-to-line" class="w-4 h-4"></i></button>
                         </div>
                     </div>
-                    <div class="flex-1 border rounded bg-white shadow-inner relative overflow-auto flex justify-center p-8"><div id="grid-container" class="seat-grid select-none"></div></div>
+                    <div class="flex-1 border rounded bg-white shadow-inner relative overflow-auto flex flex-col">
+                        <div id="divide-instructions" class="hidden px-4 py-2 bg-amber-50 border-b border-amber-300 text-amber-800 text-xs font-medium sticky top-0 z-10 flex items-center gap-2">
+                            <span class="text-base">✂</span>
+                            <span><strong>Modo División:</strong> Haz clic en una cabecera de columna o fila para marcar el punto de corte (se mostrará en rojo). Esa columna/fila será el inicio de un nuevo área. Pulsa <strong>Ejecutar División</strong> cuando hayas marcado todos los cortes.</span>
+                        </div>
+                        <div class="flex-1 flex justify-center overflow-auto p-8"><div id="grid-container" class="seat-grid select-none"></div></div>
+                    </div>
                 </div>
                 <div id="seat-details-panel" class="w-80 bg-white p-4 overflow-y-auto hidden">
                     <h3 class="font-bold text-gray-700 mb-4 pb-2 border-b uppercase text-sm tracking-tight">Detalles Asiento</h3>
@@ -434,11 +463,35 @@
                     </div>
                 </div>
             </div>
-            <div class="p-4 border-t flex justify-end gap-2 bg-gray-50 rounded-b-lg">
-                <button onclick="fillAllSeats()" class="px-4 py-2 text-sm bg-white border border-gray-300 rounded text-gray-700 hover:bg-gray-100 transition-colors">Llenar Todo</button>
-                <button onclick="clearAllSeats()" class="px-4 py-2 text-sm bg-white border border-red-300 rounded text-red-600 hover:bg-red-50 transition-colors">Vaciar Todo</button>
-                <button onclick="discardSeatEditor()" class="px-6 py-2 text-sm bg-white border border-gray-300 rounded text-gray-700 hover:bg-gray-100 transition-colors">Descartar</button>
-                <button onclick="saveSeatEditor()" class="px-6 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 font-medium shadow-md transition-colors">Guardar Cambios</button>
+            <div class="p-4 border-t flex justify-between items-center gap-2 bg-gray-50 rounded-b-lg">
+                <div class="flex gap-2 items-center">
+                    <button id="btn-divide-area" onclick="toggleDivideMode()" class="px-4 py-2 text-sm bg-white border border-red-400 text-red-600 rounded hover:bg-red-50 transition-colors font-medium">Dividir Área</button>
+                    <div id="divide-execute-btns" class="hidden flex gap-2">
+                        <button onclick="showDivideDialog()" class="px-4 py-2 text-sm bg-orange-500 text-white rounded hover:bg-orange-600 font-medium transition-colors shadow-sm">Ejecutar División</button>
+                        <button onclick="cancelDivideMode()" class="px-4 py-2 text-sm bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-50 transition-colors">Cancelar</button>
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="fillAllSeats()" class="px-4 py-2 text-sm bg-white border border-gray-300 rounded text-gray-700 hover:bg-gray-100 transition-colors">Llenar Todo</button>
+                    <button onclick="clearAllSeats()" class="px-4 py-2 text-sm bg-white border border-red-300 rounded text-red-600 hover:bg-red-50 transition-colors">Vaciar Todo</button>
+                    <button onclick="discardSeatEditor()" class="px-6 py-2 text-sm bg-white border border-gray-300 rounded text-gray-700 hover:bg-gray-100 transition-colors">Descartar</button>
+                    <button onclick="saveSeatEditor()" class="px-6 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 font-medium shadow-md transition-colors">Guardar Cambios</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Diálogo de nomenclatura para División de Área -->
+    <div id="divide-dialog" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] hidden">
+        <div class="bg-white rounded-lg shadow-2xl w-[540px] max-h-[80vh] flex flex-col">
+            <div class="p-5 border-b">
+                <h2 class="font-bold text-lg text-gray-800">Configurar Nuevas Áreas</h2>
+                <p class="text-sm text-gray-500 mt-1">Se crearán <span id="divide-count" class="font-bold text-gray-700"></span> nuevas áreas. Asigna un código y nombre a cada una.</p>
+            </div>
+            <div id="divide-areas-list" class="overflow-y-auto flex-1 p-5 space-y-3"></div>
+            <div class="flex gap-2 p-4 border-t bg-gray-50 rounded-b-lg justify-end">
+                <button onclick="closeDivideDialog()" class="px-4 py-2 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-100 transition-colors">Cancelar</button>
+                <button onclick="confirmDivide()" class="px-5 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 font-medium shadow-sm transition-colors">Confirmar División</button>
             </div>
         </div>
     </div>
@@ -2181,6 +2234,150 @@
         // --- Editor Asientos ---
         let _seatEditorSnapshot = null;
         let _seatEditorHistoryLength = 0;
+        let _divideState = { active: false, colSplits: [], rowSplits: [] };
+
+        function toggleDivideMode() {
+            if (_divideState.active) { cancelDivideMode(); return; }
+            _divideState = { active: true, colSplits: [], rowSplits: [] };
+            document.getElementById('btn-divide-area').classList.add('divide-active');
+            document.getElementById('divide-execute-btns').classList.remove('hidden');
+            document.getElementById('divide-execute-btns').classList.add('flex');
+            document.getElementById('divide-instructions').classList.remove('hidden');
+            const area = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
+            if (area) renderSeatGrid(area);
+        }
+
+        function cancelDivideMode() {
+            _divideState = { active: false, colSplits: [], rowSplits: [] };
+            document.getElementById('btn-divide-area').classList.remove('divide-active');
+            document.getElementById('divide-execute-btns').classList.add('hidden');
+            document.getElementById('divide-execute-btns').classList.remove('flex');
+            document.getElementById('divide-instructions').classList.add('hidden');
+            const area = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
+            if (area) renderSeatGrid(area);
+        }
+
+        function toggleDivideColSplit(col) {
+            const idx = _divideState.colSplits.indexOf(col);
+            if (idx === -1) _divideState.colSplits.push(col);
+            else _divideState.colSplits.splice(idx, 1);
+            const area = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
+            if (area) renderSeatGrid(area);
+        }
+
+        function toggleDivideRowSplit(row) {
+            const idx = _divideState.rowSplits.indexOf(row);
+            if (idx === -1) _divideState.rowSplits.push(row);
+            else _divideState.rowSplits.splice(idx, 1);
+            const area = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
+            if (area) renderSeatGrid(area);
+        }
+
+        function buildDivideSubAreas(area) {
+            const colSplits = [..._divideState.colSplits].filter(s => s > area.seatMin && s <= area.seatMax).sort((a,b) => a-b);
+            const rowSplits = [..._divideState.rowSplits].filter(r => r > area.rowMin && r <= area.rowMax).sort((a,b) => a-b);
+            let colRanges = [];
+            if (colSplits.length > 0) {
+                let prev = area.seatMin;
+                for (const split of colSplits) { colRanges.push({ seatMin: prev, seatMax: split - 1 }); prev = split; }
+                colRanges.push({ seatMin: prev, seatMax: area.seatMax });
+            } else {
+                colRanges = [{ seatMin: area.seatMin, seatMax: area.seatMax }];
+            }
+            let rowRanges = [];
+            if (rowSplits.length > 0) {
+                let prev = area.rowMin;
+                for (const split of rowSplits) { rowRanges.push({ rowMin: prev, rowMax: split - 1 }); prev = split; }
+                rowRanges.push({ rowMin: prev, rowMax: area.rowMax });
+            } else {
+                rowRanges = [{ rowMin: area.rowMin, rowMax: area.rowMax }];
+            }
+            const subAreas = [];
+            for (const rr of rowRanges) for (const cr of colRanges) subAreas.push({ ...cr, ...rr });
+            return subAreas;
+        }
+
+        function showDivideDialog() {
+            const area = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
+            if (!area) return;
+            const subAreas = buildDivideSubAreas(area);
+            if (subAreas.length <= 1) { alert('Selecciona al menos un punto de corte válido dentro del rango del área.'); return; }
+            document.getElementById('divide-count').innerText = subAreas.length;
+            const list = document.getElementById('divide-areas-list');
+            list.innerHTML = '';
+            subAreas.forEach((sa, i) => {
+                const div = document.createElement('div');
+                div.className = 'border border-gray-200 rounded-lg p-3 bg-gray-50';
+                div.innerHTML = `
+                    <div class="text-xs font-bold text-gray-400 uppercase mb-2 tracking-wide">
+                        Área ${i+1} &mdash; Cols ${sa.seatMin}–${sa.seatMax}, Filas ${sa.rowMin}–${sa.rowMax}
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Código</label>
+                            <input type="text" class="divide-area-code w-full p-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-400" value="${area.code}" data-index="${i}">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">Nombre</label>
+                            <input type="text" class="divide-area-title w-full p-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-400" value="${area.title}" data-index="${i}">
+                        </div>
+                    </div>`;
+                list.appendChild(div);
+            });
+            document.getElementById('divide-dialog').dataset.subAreas = JSON.stringify(subAreas);
+            document.getElementById('divide-dialog').classList.remove('hidden');
+        }
+
+        function closeDivideDialog() {
+            document.getElementById('divide-dialog').classList.add('hidden');
+        }
+
+        function confirmDivide() {
+            const area = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
+            if (!area) return;
+            const subAreas = JSON.parse(document.getElementById('divide-dialog').dataset.subAreas);
+            const codes = [...document.querySelectorAll('.divide-area-code')].map(i => i.value.trim() || area.code);
+            const titles = [...document.querySelectorAll('.divide-area-title')].map(i => i.value.trim() || area.title);
+            saveStateToHistory();
+            const originalSeats = AppState.seats.filter(s => s.areaId === area.id);
+            const newAreaIds = [];
+            subAreas.forEach((sa, i) => {
+                AppState.areaCounter++;
+                const newId = `temp-area-${AppState.areaCounter}`;
+                newAreaIds.push(newId);
+                const newArea = JSON.parse(JSON.stringify(area));
+                newArea.id = newId;
+                newArea.code = codes[i];
+                newArea.title = titles[i];
+                newArea.seatMin = sa.seatMin;
+                newArea.seatMax = sa.seatMax;
+                newArea.rowMin = sa.rowMin;
+                newArea.rowMax = sa.rowMax;
+                delete newArea.groupId;
+                AppState.areas.push(newArea);
+                originalSeats.forEach(seat => {
+                    if (seat.seatPos >= sa.seatMin && seat.seatPos <= sa.seatMax &&
+                        seat.rowPos >= sa.rowMin && seat.rowPos <= sa.rowMax) {
+                        AppState.seatCounter++;
+                        const newSeat = JSON.parse(JSON.stringify(seat));
+                        newSeat.seatId = `temp-seat-${AppState.seatCounter}`;
+                        newSeat.areaId = newId;
+                        newSeat.sectorId = area.sectorId;
+                        AppState.seats.push(newSeat);
+                    }
+                });
+            });
+            AppState.areas = AppState.areas.filter(a => a.id !== area.id);
+            AppState.seats = AppState.seats.filter(s => s.areaId !== area.id);
+            AppState.selectedAreaIds = [newAreaIds[0]];
+            AppState.expandedSectors.add(area.sectorId);
+            closeDivideDialog();
+            _divideState = { active: false, colSplits: [], rowSplits: [] };
+            _seatEditorSnapshot = null;
+            document.getElementById('seat-modal').classList.add('hidden');
+            renderMap();
+            updateUI();
+        }
 
         function openSeatEditor() {
             const a = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]); if (!a) return;
@@ -2232,6 +2429,11 @@
                 AppState.history.length = _seatEditorHistoryLength;
             }
             _seatEditorSnapshot = null;
+            _divideState = { active: false, colSplits: [], rowSplits: [] };
+            document.getElementById('btn-divide-area').classList.remove('divide-active');
+            document.getElementById('divide-execute-btns').classList.add('hidden');
+            document.getElementById('divide-execute-btns').classList.remove('flex');
+            document.getElementById('divide-instructions').classList.add('hidden');
             document.getElementById('seat-modal').classList.add('hidden');
             renderMap();
             updateUI();
@@ -2323,33 +2525,53 @@
             cont.appendChild(document.createElement('div'));
             for (let s=area.seatMin; s<=area.seatMax; s++) {
                 const d=document.createElement('div');
-                d.className='grid-header-col' + (AppState.selectedColumns.includes(s) ? ' selected' : '');
+                const isSplitCol = _divideState.active && _divideState.colSplits.includes(s);
+                d.className='grid-header-col' + (AppState.selectedColumns.includes(s) ? ' selected' : '') + (isSplitCol ? ' divide-split' : '');
                 d.innerText=s;
-                d.onclick = ((col)=>(e)=>selectColumn(area, col, e.ctrlKey || e.metaKey || e.shiftKey))(s);
+                if (_divideState.active) {
+                    if (s > area.seatMin) {
+                        d.style.cursor = 'pointer';
+                        d.title = isSplitCol ? 'Quitar corte' : 'Cortar antes de esta columna';
+                        d.onclick = ((col) => () => toggleDivideColSplit(col))(s);
+                    }
+                } else {
+                    d.onclick = ((col)=>(e)=>selectColumn(area, col, e.ctrlKey || e.metaKey || e.shiftKey))(s);
+                }
                 cont.appendChild(d);
             }
             for (let r=area.rowMax; r>=area.rowMin; r--) {
                 const dr=document.createElement('div');
-                dr.className='grid-header-row' + (AppState.selectedRows.includes(r) ? ' selected' : '');
+                const isSplitRow = _divideState.active && _divideState.rowSplits.includes(r);
+                dr.className='grid-header-row' + (AppState.selectedRows.includes(r) ? ' selected' : '') + (isSplitRow ? ' divide-split' : '');
                 dr.innerText=r;
-                dr.onclick = ((row)=>(e)=>selectRow(area, row, e.ctrlKey || e.metaKey || e.shiftKey))(r);
+                if (_divideState.active) {
+                    if (r < area.rowMax) {
+                        dr.style.cursor = 'pointer';
+                        dr.title = isSplitRow ? 'Quitar corte' : 'Cortar antes de esta fila';
+                        dr.onclick = ((row) => () => toggleDivideRowSplit(row))(r);
+                    }
+                } else {
+                    dr.onclick = ((row)=>(e)=>selectRow(area, row, e.ctrlKey || e.metaKey || e.shiftKey))(r);
+                }
                 cont.appendChild(dr);
                 for (let s=area.seatMin; s<=area.seatMax; s++) {
                     const active = existing.find(x => x.rowPos === r && x.seatPos === s);
                     const c = document.createElement('div');
                     const colSel = AppState.selectedColumns.includes(s) ? ' col-selected' : '';
                     const rowSel = AppState.selectedRows.includes(r) ? ' row-selected' : '';
-                    c.className = `seat-cell ${active?'active':''} ${AppState.selectedSeatLoc?.r===r && AppState.selectedSeatLoc?.s===s ? 'selected-seat' : ''}${colSel}${rowSel}`;
-                    if (AppState.seatEditMode === 'paint') {
-                        c.onmousedown=()=>{ 
-                            saveStateToHistory();
-                            isDrawingSeats=true; 
-                            drawingMode = !c.classList.contains('active'); 
-                            toggleSeat(area,r,s,drawingMode); 
-                            c.classList.toggle('active',drawingMode); 
-                        };
-                        c.onmouseenter=()=>{ if(isDrawingSeats && c.classList.contains('active')!==drawingMode){ toggleSeat(area,r,s,drawingMode); c.classList.toggle('active',drawingMode); } };
-                    } else { c.onclick = () => selectSeatInGrid(area, r, s); }
+                    c.className = `seat-cell ${active?'active':''} ${AppState.selectedSeatLoc?.r===r && AppState.selectedSeatLoc?.s===s ? 'selected-seat' : ''}${colSel}${rowSel}${_divideState.active ? ' divide-mode' : ''}`;
+                    if (!_divideState.active) {
+                        if (AppState.seatEditMode === 'paint') {
+                            c.onmousedown=()=>{
+                                saveStateToHistory();
+                                isDrawingSeats=true;
+                                drawingMode = !c.classList.contains('active');
+                                toggleSeat(area,r,s,drawingMode);
+                                c.classList.toggle('active',drawingMode);
+                            };
+                            c.onmouseenter=()=>{ if(isDrawingSeats && c.classList.contains('active')!==drawingMode){ toggleSeat(area,r,s,drawingMode); c.classList.toggle('active',drawingMode); } };
+                        } else { c.onclick = () => selectSeatInGrid(area, r, s); }
+                    }
                     cont.appendChild(c);
                 }
             }
