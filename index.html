@@ -2138,6 +2138,35 @@
             applyFitArcPreview();
         }
 
+        // Helper: aplica translate+rotate a la cuña para llevar su polígono (snap.points)
+        // al slot. slotCentroid = posición destino; slotFront = dirección hacia donde
+        // mira la flecha roja en el slot.
+        function _placeWedgeAtSlot(area, snap, slotCentroid, slotFront) {
+            const origFront = ArcMath.computeFrontDirection({ points: snap.points });
+            const origCentroid = getCentroid(snap.points);
+            const origAngle = Math.atan2(origFront.y, origFront.x);
+            const targetAngle = Math.atan2(slotFront.y, slotFront.x);
+            const rotation = targetAngle - origAngle;
+            const dx = slotCentroid.x - origCentroid.x;
+            const dy = slotCentroid.y - origCentroid.y;
+            const cos = Math.cos(rotation), sin = Math.sin(rotation);
+            area.points = snap.points.map(p => {
+                const tx = p.x + dx, ty = p.y + dy;
+                return {
+                    x: slotCentroid.x + (tx - slotCentroid.x) * cos - (ty - slotCentroid.y) * sin,
+                    y: slotCentroid.y + (tx - slotCentroid.x) * sin + (ty - slotCentroid.y) * cos
+                };
+            });
+            if (snap.seatGrid) {
+                let g = ArcMath.translateSeatGrid(snap.seatGrid, dx, dy);
+                g = ArcMath.rotateSeatGrid(g, slotCentroid.x, slotCentroid.y, rotation);
+                area.seatGrid = g;
+            } else if (area.points.length >= 4) {
+                area.seatGrid = ArcMath.computeSeatGridFromPolygon(area);
+            }
+            delete area.shape;
+        }
+
         function applyFitArcPreview() {
             if (!_fitArcCtx) return;
             const pct = parseFloat(document.getElementById('fit-arc-curvature').value);
@@ -2172,8 +2201,6 @@
 
             // pct = 100% → recta perfecta (polígonos rectangulares en fila).
             if (pct >= 99.5) {
-                // Dirección de la línea: perpendicular al frente, rotada 90° CW
-                // (si el frente apunta hacia abajo, la fila se extiende horizontalmente).
                 const fd = _fitArcCtx.frontDir || { x: 0, y: 1 };
                 const directionRad = Math.atan2(-fd.x, fd.y);
                 const layout = ArcMath.layAreasFlat(ordered, {
@@ -2185,10 +2212,16 @@
                 sel.forEach(area => {
                     const pts = byId.get(area.id);
                     if (!pts) return;
-                    area.points = pts;
-                    delete area.shape;
-                    // Recomputar seatGrid para el nuevo polígono recto (los asientos siguen el área).
-                    area.seatGrid = ArcMath.computeSeatGridFromPolygon(area);
+                    const snap = _fitArcCtx.snapshot.get(area.id);
+                    if (wedgeIds.has(area.id)) {
+                        // Cuña en modo recta: conservamos la forma original del polígono y
+                        // sólo movemos/rotamos para encajar en el slot que le toca de la fila.
+                        _placeWedgeAtSlot(area, snap, getCentroid(pts), fd);
+                    } else {
+                        area.points = pts;
+                        delete area.shape;
+                        area.seatGrid = ArcMath.computeSeatGridFromPolygon(area);
+                    }
                 });
                 renderMap();
                 return;
@@ -2223,8 +2256,6 @@
                 if (!r) return;
                 const snap = _fitArcCtx.snapshot.get(area.id);
                 if (r.isWedge) {
-                    // Posicionar el polígono original de la cuña en el slot reservado,
-                    // alineando su flecha (front) con el radio inward del slot.
                     const slot = r.slot;
                     const midAngle = (slot.startAngle + slot.endAngle) / 2;
                     const midR = (slot.innerR + slot.outerR) / 2;
@@ -2232,37 +2263,11 @@
                         x: slot.center.x + midR * Math.cos(midAngle),
                         y: slot.center.y + midR * Math.sin(midAngle)
                     };
-                    // Dirección "hacia el campo" del slot = desde el centroide del slot al centro del arco.
                     let sfx = slot.center.x - slotCentroid.x;
                     let sfy = slot.center.y - slotCentroid.y;
                     const sfl = Math.hypot(sfx, sfy) || 1;
-                    sfx /= sfl; sfy /= sfl;
-
-                    const origFront = ArcMath.computeFrontDirection({ points: snap.points });
-                    const origCentroid = getCentroid(snap.points);
-                    const origAngle = Math.atan2(origFront.y, origFront.x);
-                    const targetAngle = Math.atan2(sfy, sfx);
-                    const rotation = targetAngle - origAngle;
-
-                    const dx = slotCentroid.x - origCentroid.x;
-                    const dy = slotCentroid.y - origCentroid.y;
-                    const cos = Math.cos(rotation), sin = Math.sin(rotation);
-                    area.points = snap.points.map(p => {
-                        const tx = p.x + dx, ty = p.y + dy;
-                        return {
-                            x: slotCentroid.x + (tx - slotCentroid.x) * cos - (ty - slotCentroid.y) * sin,
-                            y: slotCentroid.y + (tx - slotCentroid.x) * sin + (ty - slotCentroid.y) * cos
-                        };
-                    });
-                    // Misma transformación al seatGrid de la cuña (o se deriva si no existía).
-                    if (snap.seatGrid) {
-                        let g = ArcMath.translateSeatGrid(snap.seatGrid, dx, dy);
-                        g = ArcMath.rotateSeatGrid(g, slotCentroid.x, slotCentroid.y, rotation);
-                        area.seatGrid = g;
-                    } else if (area.points.length >= 4) {
-                        area.seatGrid = ArcMath.computeSeatGridFromPolygon(area);
-                    }
-                    delete area.shape;
+                    const slotFront = { x: sfx / sfl, y: sfy / sfl };
+                    _placeWedgeAtSlot(area, snap, slotCentroid, slotFront);
                 } else {
                     area.shape = ArcMath.clampArcShape(r.shape);
                     syncArcPoints(area);
