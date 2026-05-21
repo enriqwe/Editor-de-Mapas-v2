@@ -241,6 +241,105 @@
     }
 
     /**
+     * Dado un conjunto de áreas rectangulares y un centro objetivo, calcula los
+     * parámetros del arco que las acoplará SIN deformar los asientos:
+     *  - innerR/outerR: derivados del nº máximo de filas × paso radial original,
+     *    de modo que cada celda mantenga aproximadamente su altura.
+     *  - startAngle/endAngle: derivados de Σ(nSeats × pasoAngular) para que
+     *    cada celda mantenga aproximadamente su ancho a lo largo del midRadius.
+     *
+     * Entrada:
+     *   - areas: [{ points, seatMin, seatMax, rowMin, rowMax, shape? }]
+     *   - opts:  { center: {x,y}, midRadius?: number, orientationDeg?: number }
+     *     Si midRadius no se da, se infiere a partir de la distancia del centroide
+     *     de la selección al centro.
+     *     Si orientationDeg no se da, se infiere apuntando el centro del arco
+     *     hacia el centroide de la selección.
+     *
+     * Devuelve { center, innerR, outerR, startAngleDeg, endAngleDeg, midRadius,
+     *            cellRowSpacing, cellSeatSpacing }
+     */
+    function autoFitArcParams(areas, opts) {
+        if (!Array.isArray(areas) || areas.length === 0) throw new Error('autoFitArcParams: areas vacío');
+        const { center } = opts || {};
+        if (!center) throw new Error('autoFitArcParams: center requerido');
+
+        // Bounding boxes y centroides por área.
+        function bb(pts) {
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            for (const p of pts) {
+                if (p.x < minX) minX = p.x;
+                if (p.x > maxX) maxX = p.x;
+                if (p.y < minY) minY = p.y;
+                if (p.y > maxY) maxY = p.y;
+            }
+            return { minX, maxX, minY, maxY, w: maxX - minX, h: maxY - minY,
+                cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+        }
+
+        const stats = areas.map(a => {
+            const box = bb(a.points || []);
+            const nRows = (a.rowMax - a.rowMin + 1) || 1;
+            const nSeats = (a.seatMax - a.seatMin + 1) || 1;
+            return {
+                box,
+                nRows, nSeats,
+                rowSpacing: box.h / nRows,
+                seatSpacing: box.w / nSeats
+            };
+        });
+
+        // Estadísticos medianos: robustos ante áreas raras de la selección.
+        const median = (arr) => {
+            const s = [...arr].sort((a, b) => a - b);
+            return s[Math.floor(s.length / 2)];
+        };
+        const rowSpacing = median(stats.map(s => s.rowSpacing));
+        const seatSpacing = median(stats.map(s => s.seatSpacing));
+        const maxRows = Math.max(...stats.map(s => s.nRows));
+
+        // Centroide de la selección.
+        let selCx = 0, selCy = 0;
+        stats.forEach(s => { selCx += s.box.cx; selCy += s.box.cy; });
+        selCx /= stats.length; selCy /= stats.length;
+
+        const dx = selCx - center.x;
+        const dy = selCy - center.y;
+        let midRadius = opts.midRadius;
+        if (!Number.isFinite(midRadius)) midRadius = Math.sqrt(dx * dx + dy * dy);
+        if (midRadius < 1) midRadius = 1;
+
+        const thickness = maxRows * rowSpacing;
+        const innerR = Math.max(1, midRadius - thickness / 2);
+        const outerR = innerR + thickness;
+
+        // Orientación: ángulo del centro del arco hacia el centroide.
+        let orientation;
+        if (Number.isFinite(opts.orientationDeg)) {
+            orientation = degToRad(opts.orientationDeg);
+        } else {
+            orientation = Math.atan2(dy, dx);
+        }
+
+        // Sweep total = Σ(nSeats × seatSpacing) / midRadius.
+        const totalArcLen = stats.reduce((acc, s) => acc + s.nSeats * seatSpacing, 0);
+        const totalSweep = totalArcLen / midRadius;
+
+        const startAngle = orientation - totalSweep / 2;
+        const endAngle = orientation + totalSweep / 2;
+
+        return {
+            center: { x: center.x, y: center.y },
+            innerR, outerR,
+            startAngleDeg: radToDeg(startAngle),
+            endAngleDeg: radToDeg(endAngle),
+            midRadius,
+            cellRowSpacing: rowSpacing,
+            cellSeatSpacing: seatSpacing
+        };
+    }
+
+    /**
      * Acopla N áreas en un arco compartiendo `center`, `innerR`, `outerR`.
      * Cada área recibe una rebanada angular contigua a la anterior (sin huecos)
      * proporcional a su número de asientos (o equal si distribution='equal').
@@ -331,7 +430,7 @@
         arcOutlinePoints, arcPathD, arcCentroid, arcSeatPos,
         degToRad, radToDeg, normalizeAngle,
         arcsAreCompatible, findSnapAngle, findSnapRadius,
-        buildRingSegments, fitAreasToArc,
+        buildRingSegments, fitAreasToArc, autoFitArcParams,
         defaultArcShape, clampArcShape,
         angleFromPoint, radiusFromPoint,
         parseAreaShape, serializeAreaShape

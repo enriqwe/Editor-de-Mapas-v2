@@ -323,6 +323,76 @@ test('fitAreasToArc: lista vacía → []', () => {
     assert.deepEqual(result, []);
 });
 
+// -------- autoFitArcParams: preservación de tamaño de celda --------
+function rectAreaForTest(cx, cy, w, h, nRows, nSeats) {
+    return {
+        points: [
+            { x: cx - w/2, y: cy - h/2 },
+            { x: cx + w/2, y: cy - h/2 },
+            { x: cx + w/2, y: cy + h/2 },
+            { x: cx - w/2, y: cy + h/2 }
+        ],
+        rowMin: 1, rowMax: nRows,
+        seatMin: 1, seatMax: nSeats
+    };
+}
+
+test('autoFitArcParams: thickness preserva altura de fila (rowSpacing × maxRows)', () => {
+    // 3 áreas de 100×170 con 17 filas → rowSpacing = 10
+    const areas = [
+        rectAreaForTest(100, 0, 100, 170, 17, 28),
+        rectAreaForTest(220, 0, 100, 170, 17, 28),
+        rectAreaForTest(340, 0, 100, 170, 17, 28)
+    ];
+    const params = ArcMath.autoFitArcParams(areas, {
+        center: { x: 220, y: 1000 },
+        midRadius: 1000
+    });
+    // thickness ≈ 17 × 10 = 170
+    assert.ok(approx(params.outerR - params.innerR, 170, 1));
+    // midRadius ≈ (innerR + outerR) / 2 ≈ 1000
+    assert.ok(approx((params.innerR + params.outerR) / 2, 1000, 1));
+});
+
+test('autoFitArcParams: sweep × midRadius ≈ Σ ancho-original', () => {
+    // 3 áreas de 100×170 con 28 asientos → seatSpacing = 100/28 ≈ 3.57
+    // Σ ancho = 300, midRadius = 1000 → sweep ≈ 0.3 rad
+    const areas = [
+        rectAreaForTest(100, 0, 100, 170, 17, 28),
+        rectAreaForTest(220, 0, 100, 170, 17, 28),
+        rectAreaForTest(340, 0, 100, 170, 17, 28)
+    ];
+    const params = ArcMath.autoFitArcParams(areas, {
+        center: { x: 220, y: 1000 },
+        midRadius: 1000
+    });
+    const sweepRad = ArcMath.degToRad(params.endAngleDeg - params.startAngleDeg);
+    const arcLen = sweepRad * params.midRadius;
+    assert.ok(approx(arcLen, 300, 2));
+});
+
+test('autoFitArcParams: midRadius por defecto = distancia del centroide al centro', () => {
+    const areas = [rectAreaForTest(0, 0, 100, 50, 5, 10)];
+    const params = ArcMath.autoFitArcParams(areas, { center: { x: 0, y: 500 } });
+    assert.ok(approx(params.midRadius, 500, 1));
+});
+
+test('autoFitArcParams: orientation por defecto apunta del centro al centroide', () => {
+    const areas = [rectAreaForTest(0, -1000, 100, 50, 5, 10)];
+    const params = ArcMath.autoFitArcParams(areas, { center: { x: 0, y: 0 } });
+    const midAngleDeg = (params.startAngleDeg + params.endAngleDeg) / 2;
+    // El centroide está en (0,-1000) respecto al centro (0,0): ángulo = -90° (SVG)
+    assert.ok(approx(midAngleDeg, -90, 0.5));
+});
+
+test('autoFitArcParams: áreas vacías lanza', () => {
+    assert.throws(() => ArcMath.autoFitArcParams([], { center: { x: 0, y: 0 } }));
+});
+
+test('autoFitArcParams: sin center lanza', () => {
+    assert.throws(() => ArcMath.autoFitArcParams([rectAreaForTest(0, 0, 10, 10, 1, 1)], {}));
+});
+
 // -------- parseAreaShape / serializeAreaShape --------
 test('parseAreaShape: array legacy → polygon', () => {
     const r = ArcMath.parseAreaShape(JSON.stringify([{ x: 0, y: 0 }, { x: 10, y: 0 }]));

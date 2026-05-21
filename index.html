@@ -235,7 +235,7 @@
 
                 <div id="multi-selection-info" class="hidden text-sm p-4 bg-blue-50 text-blue-800 rounded border border-blue-200 text-center">
                     <span class="font-bold block text-lg mb-1" id="multi-count">0</span> Áreas seleccionadas
-                    <button onclick="openFitToArcDialog()" class="mt-3 w-full bg-pink-600 text-white py-1.5 rounded text-xs font-bold hover:bg-pink-700 shadow-sm flex items-center justify-center gap-1">
+                    <button onclick="openFitToArcPanel()" class="mt-3 w-full bg-pink-600 text-white py-1.5 rounded text-xs font-bold hover:bg-pink-700 shadow-sm flex items-center justify-center gap-1">
                         <i data-lucide="git-commit" class="w-3.5 h-3.5"></i> Acoplar a arco
                     </button>
                 </div>
@@ -385,8 +385,6 @@
                     <div class="flex gap-1">
                         <button onclick="createNewSector()" class="text-indigo-600 border border-indigo-200 bg-white px-2 py-1 rounded shadow-sm text-xs font-bold">+ Sec</button>
                         <button onclick="createNewArea()" class="text-blue-600 border border-blue-200 bg-white px-2 py-1 rounded shadow-sm text-xs font-bold">+ Área</button>
-                        <button onclick="createNewArcArea()" class="text-purple-600 border border-purple-200 bg-white px-2 py-1 rounded shadow-sm text-xs font-bold" title="Crea un área tipo arco (tribuna curva)">+ Arco</button>
-                        <button onclick="openStadiumRingWizard()" class="text-pink-600 border border-pink-200 bg-white px-2 py-1 rounded shadow-sm text-xs font-bold" title="Crea un anillo de tribunas dividido en N segmentos">Anillo</button>
                     </div>
                 </div>
                 <div id="tree-list" class="space-y-1 pb-4"></div>
@@ -542,116 +540,65 @@
         </div>
     </div>
 
-    <div id="fit-arc-dialog" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] hidden">
-        <div class="bg-white rounded-lg shadow-2xl w-[460px] flex flex-col">
-            <div class="p-5 border-b">
-                <h2 class="font-bold text-lg text-gray-800">Acoplar áreas en un arco</h2>
-                <p class="text-sm text-gray-500 mt-1">Las <span id="fit-arc-count" class="font-bold text-gray-700"></span> áreas seleccionadas se redistribuirán como segmentos contiguos de un mismo arco. Los asientos existentes se preservan.</p>
+    <!-- Panel flotante de Acoplar a Arco (no es modal: deja ver el mapa) -->
+    <div id="fit-arc-panel" class="fixed top-20 right-4 bg-white rounded-lg shadow-2xl w-[280px] z-[55] hidden border border-pink-300">
+        <div class="p-3 border-b flex items-center justify-between bg-pink-50 rounded-t-lg">
+            <h2 class="font-bold text-sm text-pink-700 flex items-center gap-1"><i data-lucide="git-commit" class="w-4 h-4"></i> Acoplar a arco</h2>
+            <button onclick="closeFitToArcPanel()" class="text-gray-500 hover:text-gray-700"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <div class="p-3 text-xs text-gray-600">
+            <span id="fit-arc-count" class="font-bold text-gray-800">0</span> áreas seleccionadas. <span class="text-purple-600 font-medium">Arrastra el punto morado</span> sobre el mapa para mover el centro del arco.
+        </div>
+        <div class="p-3 space-y-3 text-sm border-t">
+            <div>
+                <label class="block text-xs font-medium text-gray-600">Distancia al centro (radio medio)</label>
+                <input type="range" id="fit-arc-radius" min="100" max="3000" step="10" class="w-full mt-1" oninput="onFitArcInput()">
+                <div class="text-[10px] text-gray-500 flex justify-between"><span>100</span><span id="fit-arc-radius-val" class="font-bold text-gray-700">—</span><span>3000</span></div>
             </div>
-            <div class="p-5 space-y-3 text-sm">
-                <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="block text-xs font-medium text-gray-600">Distribución</label>
+                <select id="fit-arc-distribution" class="w-full mt-1 border-gray-300 rounded border p-1.5 text-xs" onchange="onFitArcInput()">
+                    <option value="seats">Proporcional al nº de asientos</option>
+                    <option value="equal">Equiparado entre áreas</option>
+                </select>
+            </div>
+            <details class="text-xs">
+                <summary class="cursor-pointer text-gray-500 hover:text-gray-700">Ajuste fino (avanzado)</summary>
+                <div class="grid grid-cols-2 gap-2 mt-2">
                     <div>
-                        <label class="block text-xs font-medium text-gray-600">Centro X</label>
-                        <input type="number" id="fit-arc-cx" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                        <label class="block text-[10px] font-medium text-gray-500">Centro X</label>
+                        <input type="number" id="fit-arc-cx" class="w-full mt-0.5 border-gray-300 rounded border p-1 text-xs" oninput="onFitArcInput()">
                     </div>
                     <div>
-                        <label class="block text-xs font-medium text-gray-600">Centro Y</label>
-                        <input type="number" id="fit-arc-cy" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                        <label class="block text-[10px] font-medium text-gray-500">Centro Y</label>
+                        <input type="number" id="fit-arc-cy" class="w-full mt-0.5 border-gray-300 rounded border p-1 text-xs" oninput="onFitArcInput()">
                     </div>
                     <div>
-                        <label class="block text-xs font-medium text-gray-600">Radio interior</label>
-                        <input type="number" id="fit-arc-inner" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                        <label class="block text-[10px] font-medium text-gray-500">Radio interior</label>
+                        <input type="number" id="fit-arc-inner" class="w-full mt-0.5 border-gray-300 rounded border p-1 text-xs" oninput="onFitArcInput()">
                     </div>
                     <div>
-                        <label class="block text-xs font-medium text-gray-600">Radio exterior</label>
-                        <input type="number" id="fit-arc-outer" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                        <label class="block text-[10px] font-medium text-gray-500">Radio exterior</label>
+                        <input type="number" id="fit-arc-outer" class="w-full mt-0.5 border-gray-300 rounded border p-1 text-xs" oninput="onFitArcInput()">
                     </div>
                     <div>
-                        <label class="block text-xs font-medium text-gray-600">Ángulo inicio (°)</label>
-                        <input type="number" id="fit-arc-start" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                        <label class="block text-[10px] font-medium text-gray-500">Ángulo inicio (°)</label>
+                        <input type="number" id="fit-arc-start" class="w-full mt-0.5 border-gray-300 rounded border p-1 text-xs" oninput="onFitArcInput()">
                     </div>
                     <div>
-                        <label class="block text-xs font-medium text-gray-600">Ángulo fin (°)</label>
-                        <input type="number" id="fit-arc-end" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                        <label class="block text-[10px] font-medium text-gray-500">Ángulo fin (°)</label>
+                        <input type="number" id="fit-arc-end" class="w-full mt-0.5 border-gray-300 rounded border p-1 text-xs" oninput="onFitArcInput()">
                     </div>
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-gray-600">Distribución</label>
-                    <select id="fit-arc-distribution" class="w-full mt-1 border-gray-300 rounded border p-1.5">
-                        <option value="seats">Proporcional al nº de asientos (recomendado)</option>
-                        <option value="equal">Equiparado entre áreas</option>
-                    </select>
                 </div>
                 <div class="flex items-center gap-2 mt-2">
-                    <input type="checkbox" id="fit-arc-sort" checked class="w-4 h-4">
-                    <label for="fit-arc-sort" class="text-xs text-gray-700">Ordenar por posición horizontal actual (de izquierda a derecha)</label>
+                    <input type="checkbox" id="fit-arc-sort" checked class="w-3 h-3" onchange="onFitArcInput()">
+                    <label for="fit-arc-sort" class="text-[10px] text-gray-600">Ordenar áreas por posición X actual</label>
                 </div>
-            </div>
-            <div class="flex gap-2 p-4 border-t bg-gray-50 rounded-b-lg justify-end">
-                <button onclick="closeFitToArcDialog()" class="px-4 py-2 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-100">Cancelar</button>
-                <button onclick="confirmFitToArc()" class="px-5 py-2 text-sm bg-pink-600 text-white rounded hover:bg-pink-700 font-medium shadow-sm">Acoplar</button>
-            </div>
+            </details>
         </div>
-    </div>
-
-    <div id="ring-wizard-dialog" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] hidden">
-        <div class="bg-white rounded-lg shadow-2xl w-[460px] flex flex-col">
-            <div class="p-5 border-b">
-                <h2 class="font-bold text-lg text-gray-800">Wizard: Anillo de Tribunas</h2>
-                <p class="text-sm text-gray-500 mt-1">Crea N tribunas en arco distribuidas alrededor de un centro, perfectamente acopladas.</p>
-            </div>
-            <div class="p-5 space-y-3 text-sm">
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600">Centro X</label>
-                        <input type="number" id="ring-cx" value="600" class="w-full mt-1 border-gray-300 rounded border p-1.5">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600">Centro Y</label>
-                        <input type="number" id="ring-cy" value="400" class="w-full mt-1 border-gray-300 rounded border p-1.5">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600">Radio interior</label>
-                        <input type="number" id="ring-inner" value="250" class="w-full mt-1 border-gray-300 rounded border p-1.5">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600">Radio exterior</label>
-                        <input type="number" id="ring-outer" value="340" class="w-full mt-1 border-gray-300 rounded border p-1.5">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600">Ángulo inicio (°)</label>
-                        <input type="number" id="ring-start" value="0" class="w-full mt-1 border-gray-300 rounded border p-1.5">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600">Ángulo fin (°)</label>
-                        <input type="number" id="ring-end" value="360" class="w-full mt-1 border-gray-300 rounded border p-1.5">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600">Número de tribunas</label>
-                        <input type="number" id="ring-segs" min="1" value="8" class="w-full mt-1 border-gray-300 rounded border p-1.5">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600">Pasillo entre tribunas (°)</label>
-                        <input type="number" id="ring-gap" min="0" step="0.5" value="1" class="w-full mt-1 border-gray-300 rounded border p-1.5">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600">Filas por tribuna</label>
-                        <input type="number" id="ring-rows" min="1" value="10" class="w-full mt-1 border-gray-300 rounded border p-1.5">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-600">Asientos por tribuna</label>
-                        <input type="number" id="ring-seats" min="1" value="20" class="w-full mt-1 border-gray-300 rounded border p-1.5">
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-gray-600">Prefijo código</label>
-                    <input type="text" id="ring-prefix" value="T" class="w-full mt-1 border-gray-300 rounded border p-1.5">
-                </div>
-            </div>
-            <div class="flex gap-2 p-4 border-t bg-gray-50 rounded-b-lg justify-end">
-                <button onclick="closeStadiumRingWizard()" class="px-4 py-2 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-100">Cancelar</button>
-                <button onclick="confirmStadiumRing()" class="px-5 py-2 text-sm bg-pink-600 text-white rounded hover:bg-pink-700 font-medium shadow-sm">Crear Anillo</button>
-            </div>
+        <div class="flex gap-2 p-3 border-t bg-gray-50 rounded-b-lg">
+            <button onclick="closeFitToArcPanel()" class="flex-1 px-3 py-1.5 text-xs border border-gray-300 rounded text-gray-700 hover:bg-gray-100">Cancelar</button>
+            <button onclick="confirmFitToArc()" class="flex-1 px-3 py-1.5 text-xs bg-pink-600 text-white rounded hover:bg-pink-700 font-medium">Aplicar</button>
         </div>
     </div>
 
@@ -1820,6 +1767,32 @@
             });
 
             // Controles especiales para multi-selección que NO son grupos creados
+            // Marcador draggable del centro del arco mientras "Acoplar a arco" está activo
+            if (_fitArcCtx) {
+                const fcx = parseFloat(document.getElementById('fit-arc-cx').value);
+                const fcy = parseFloat(document.getElementById('fit-arc-cy').value);
+                if (Number.isFinite(fcx) && Number.isFinite(fcy)) {
+                    const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                    ring.setAttribute("cx", fcx); ring.setAttribute("cy", fcy);
+                    ring.setAttribute("r", 14);
+                    ring.setAttribute("fill", "rgba(168,85,247,0.15)");
+                    ring.setAttribute("stroke", "#a855f7");
+                    ring.setAttribute("stroke-width", 1.5);
+                    ring.setAttribute("stroke-dasharray", "4 3");
+                    ring.style.pointerEvents = 'none';
+                    controlsLayer.appendChild(ring);
+                    const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                    dot.setAttribute("cx", fcx); dot.setAttribute("cy", fcy);
+                    dot.setAttribute("r", 7);
+                    dot.setAttribute("fill", "#9333ea");
+                    dot.setAttribute("stroke", "#fff");
+                    dot.setAttribute("stroke-width", 2);
+                    dot.style.cursor = 'grab';
+                    dot.addEventListener('mousedown', startMoveFitArcCenter);
+                    controlsLayer.appendChild(dot);
+                }
+            }
+
             if (AppState.selectedAreaIds.length > 1 && (!AppState.curveAlignment || !AppState.curveAlignment.active) && !AppState.activeGroupId) {
                 const groupBounds = getSelectionBounds();
                 if (groupBounds) {
@@ -1990,48 +1963,127 @@
         }
 
         /**
-         * Fase 7: Acoplar áreas seleccionadas en un arco.
-         * Toma N áreas con sus asientos ya definidos y las redistribuye
-         * como segmentos contiguos de un mismo arco. Acople perfecto garantizado
-         * porque todas comparten center, innerR y outerR.
+         * Acoplar áreas seleccionadas en un arco.
+         * Las áreas conservan sus IDs, códigos, asientos y nº de filas/asientos.
+         * Sólo se les asigna un shape de arco contiguo. autoFitArcParams se
+         * encarga de derivar radios y sweep que preserven el tamaño de celda.
          */
-        function openFitToArcDialog() {
+        let _fitArcCtx = null; // { selected: Area[], original: Map<id, area> snapshot }
+
+        function openFitToArcPanel() {
             const sel = AppState.selectedAreaIds.map(id => AppState.areas.find(a => a.id === id)).filter(Boolean);
             if (sel.length < 2) {
                 alert('Selecciona al menos 2 áreas para acoplarlas en arco.');
                 return;
             }
-            // Defaults razonables basados en el bounding box de la selección.
+            // Snapshot para poder cancelar restaurando el estado original.
+            const snapshot = new Map();
+            sel.forEach(a => snapshot.set(a.id, {
+                shape: a.shape ? JSON.parse(JSON.stringify(a.shape)) : null,
+                points: JSON.parse(JSON.stringify(a.points)),
+                groupId: a.groupId
+            }));
+            _fitArcCtx = { selected: sel, snapshot };
+
+            // Calcular defaults inteligentes: centro debajo de la selección, midRadius
+            // tal que el sweep cubra el ancho actual sin deformar las celdas.
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
             sel.forEach(a => {
                 const b = getBounds(a.points);
                 minX = Math.min(minX, b.minX); maxX = Math.max(maxX, b.maxX);
                 minY = Math.min(minY, b.minY); maxY = Math.max(maxY, b.maxY);
             });
-            const cx = (minX + maxX) / 2;
-            const cy = maxY + (maxX - minX) * 0.5; // centro del arco por debajo de las áreas
-            const dist = cy - (minY + maxY) / 2;
-            const inner = Math.max(50, dist - (maxY - minY));
-            const outer = inner + (maxY - minY);
-            // Sweep aproximado: cubre el ancho de la selección a una distancia `dist`
-            const halfSweepRad = Math.atan2((maxX - minX) / 2, dist);
-            const halfSweepDeg = halfSweepRad * 180 / Math.PI;
+            const selCx = (minX + maxX) / 2, selCy = (minY + maxY) / 2;
+            const initialMidR = Math.max(maxX - minX, 400); // por defecto, radio grande → curva suave
+            const initialCenter = { x: selCx, y: selCy + initialMidR };
 
             document.getElementById('fit-arc-count').innerText = sel.length;
-            document.getElementById('fit-arc-cx').value = Math.round(cx);
-            document.getElementById('fit-arc-cy').value = Math.round(cy);
-            document.getElementById('fit-arc-inner').value = Math.round(inner);
-            document.getElementById('fit-arc-outer').value = Math.round(outer);
-            document.getElementById('fit-arc-start').value = Math.round(-90 - halfSweepDeg);
-            document.getElementById('fit-arc-end').value = Math.round(-90 + halfSweepDeg);
-            document.getElementById('fit-arc-dialog').classList.remove('hidden');
+            document.getElementById('fit-arc-radius').value = Math.round(initialMidR);
+            document.getElementById('fit-arc-radius-val').innerText = Math.round(initialMidR);
+
+            const params = ArcMath.autoFitArcParams(sel, { center: initialCenter, midRadius: initialMidR });
+            document.getElementById('fit-arc-cx').value = Math.round(params.center.x);
+            document.getElementById('fit-arc-cy').value = Math.round(params.center.y);
+            document.getElementById('fit-arc-inner').value = Math.round(params.innerR);
+            document.getElementById('fit-arc-outer').value = Math.round(params.outerR);
+            document.getElementById('fit-arc-start').value = Math.round(params.startAngleDeg);
+            document.getElementById('fit-arc-end').value = Math.round(params.endAngleDeg);
+            document.getElementById('fit-arc-panel').classList.remove('hidden');
+
+            // Aplica preview inmediatamente.
+            applyFitArcPreview();
+            lucide.createIcons();
         }
 
-        function closeFitToArcDialog() {
-            document.getElementById('fit-arc-dialog').classList.add('hidden');
+        function closeFitToArcPanel() {
+            // Restaurar snapshot si se cancela.
+            if (_fitArcCtx) {
+                _fitArcCtx.selected.forEach(a => {
+                    const snap = _fitArcCtx.snapshot.get(a.id);
+                    if (!snap) return;
+                    if (snap.shape) a.shape = snap.shape;
+                    else delete a.shape;
+                    a.points = snap.points;
+                    if (snap.groupId) a.groupId = snap.groupId;
+                });
+                _fitArcCtx = null;
+            }
+            document.getElementById('fit-arc-panel').classList.add('hidden');
+            renderMap();
+            updateUI();
         }
 
-        function confirmFitToArc() {
+        function onFitArcInput() {
+            // Si el usuario mueve el slider de radio, recomputamos auto params
+            // (re-deriva innerR/outerR/start/end preservando tamaño de celda).
+            // Si toca campos avanzados, esos valores ganan.
+            const radiusEl = document.getElementById('fit-arc-radius');
+            const radiusVal = parseFloat(radiusEl.value);
+            document.getElementById('fit-arc-radius-val').innerText = Math.round(radiusVal);
+
+            if (_fitArcCtx && document.activeElement === radiusEl) {
+                const sel = _fitArcCtx.selected;
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                sel.forEach(a => {
+                    const snap = _fitArcCtx.snapshot.get(a.id);
+                    const pts = snap ? snap.points : a.points;
+                    const b = getBounds(pts);
+                    minX = Math.min(minX, b.minX); maxX = Math.max(maxX, b.maxX);
+                    minY = Math.min(minY, b.minY); maxY = Math.max(maxY, b.maxY);
+                });
+                const selCx = (minX + maxX) / 2, selCy = (minY + maxY) / 2;
+                const cx = parseFloat(document.getElementById('fit-arc-cx').value);
+                const cy = parseFloat(document.getElementById('fit-arc-cy').value);
+                // Mantener la dirección del centro respecto a la selección, ajustar distancia.
+                const dx = cx - selCx, dy = cy - selCy;
+                const curDist = Math.sqrt(dx * dx + dy * dy) || 1;
+                const newCx = selCx + dx * (radiusVal / curDist);
+                const newCy = selCy + dy * (radiusVal / curDist);
+                // Recompute todos los demás campos a partir de centro + radio.
+                const orig = sel.map(a => {
+                    const snap = _fitArcCtx.snapshot.get(a.id);
+                    return {
+                        points: snap.points,
+                        rowMin: a.rowMin, rowMax: a.rowMax,
+                        seatMin: a.seatMin, seatMax: a.seatMax
+                    };
+                });
+                const auto = ArcMath.autoFitArcParams(orig, {
+                    center: { x: newCx, y: newCy },
+                    midRadius: radiusVal
+                });
+                document.getElementById('fit-arc-cx').value = Math.round(auto.center.x);
+                document.getElementById('fit-arc-cy').value = Math.round(auto.center.y);
+                document.getElementById('fit-arc-inner').value = Math.round(auto.innerR);
+                document.getElementById('fit-arc-outer').value = Math.round(auto.outerR);
+                document.getElementById('fit-arc-start').value = Math.round(auto.startAngleDeg);
+                document.getElementById('fit-arc-end').value = Math.round(auto.endAngleDeg);
+            }
+            applyFitArcPreview();
+        }
+
+        function applyFitArcPreview() {
+            if (!_fitArcCtx) return;
             const num = (id) => parseFloat(document.getElementById(id).value);
             const params = {
                 center: { x: num('fit-arc-cx'), y: num('fit-arc-cy') },
@@ -2041,19 +2093,17 @@
                 endAngleDeg: num('fit-arc-end'),
                 distribution: document.getElementById('fit-arc-distribution').value
             };
-            if (!(params.innerR > 0) || !(params.outerR > params.innerR)) {
-                alert('Radios inválidos.');
-                return;
-            }
+            if (!(params.innerR > 0) || !(params.outerR > params.innerR)) return;
             const sortByX = document.getElementById('fit-arc-sort').checked;
-            const selected = AppState.selectedAreaIds
-                .map(id => AppState.areas.find(a => a.id === id))
-                .filter(Boolean);
+            const sel = _fitArcCtx.selected;
+            // Usamos siempre los points originales (snapshot) para ordenar.
             const ordered = sortByX
-                ? [...selected].sort((a, b) => getCentroid(a.points).x - getCentroid(b.points).x)
-                : selected;
-
-            saveStateToHistory();
+                ? [...sel].sort((a, b) => {
+                    const ap = _fitArcCtx.snapshot.get(a.id).points;
+                    const bp = _fitArcCtx.snapshot.get(b.id).points;
+                    return getCentroid(ap).x - getCentroid(bp).x;
+                })
+                : sel;
             const result = ArcMath.fitAreasToArc(ordered, params);
             const byId = new Map(result.map(r => [r.id, r.shape]));
             ordered.forEach(area => {
@@ -2061,102 +2111,51 @@
                 if (!shape) return;
                 area.shape = ArcMath.clampArcShape(shape);
                 syncArcPoints(area);
-                // Si el área pertenecía a un grupo curvo legacy, lo desligamos:
-                if (area.groupId) delete area.groupId;
             });
-            closeFitToArcDialog();
             renderMap();
-            updateUI();
         }
 
-        function openStadiumRingWizard() {
-            const viewport = document.getElementById('main-viewport');
-            const rect = viewport.getBoundingClientRect();
-            const cx = (rect.width/2 - AppState.panX) / AppState.zoom;
-            const cy = (rect.height/2 - AppState.panY) / AppState.zoom;
-            document.getElementById('ring-cx').value = Math.round(cx);
-            document.getElementById('ring-cy').value = Math.round(cy);
-            document.getElementById('ring-wizard-dialog').classList.remove('hidden');
-        }
-
-        function closeStadiumRingWizard() {
-            document.getElementById('ring-wizard-dialog').classList.add('hidden');
-        }
-
-        function confirmStadiumRing() {
-            const num = (id) => parseFloat(document.getElementById(id).value);
-            const intg = (id) => parseInt(document.getElementById(id).value, 10);
-            const params = {
-                center: { x: num('ring-cx'), y: num('ring-cy') },
-                innerR: num('ring-inner'),
-                outerR: num('ring-outer'),
-                startAngleDeg: num('ring-start'),
-                endAngleDeg: num('ring-end'),
-                segments: intg('ring-segs'),
-                gapDeg: num('ring-gap')
-            };
-            if (!(params.innerR > 0) || !(params.outerR > params.innerR) || !(params.segments >= 1)) {
-                alert('Parámetros inválidos: revisa radios y número de segmentos.');
-                return;
-            }
-            const rows = Math.max(1, intg('ring-rows') || 1);
-            const seats = Math.max(1, intg('ring-seats') || 1);
-            const prefix = (document.getElementById('ring-prefix').value || 'T').trim();
-
-            saveStateToHistory();
-            const targetSectorId = AppState.selectedSectorId || AppState.sectors[0]?.id || 'default-sec';
-            if (AppState.sectors.length === 0) {
-                AppState.sectors.push({ id: 'default-sec', title: 'Sector General' });
-            }
-            const shapes = ArcMath.buildRingSegments(params);
-            const newIds = [];
-            shapes.forEach((shape, i) => {
-                const id = generateUniqueAreaId();
-                const code = `${prefix}${i + 1}`;
-                const area = {
-                    id, title: `Tribuna ${i + 1}`, code, sectorId: targetSectorId,
-                    shape: ArcMath.clampArcShape(shape),
-                    points: ArcMath.arcOutlinePoints(shape),
-                    rowMin: 1, rowMax: rows, seatMin: 1, seatMax: seats,
-                    rowLabelOffset: 0, puerta: ''
-                };
-                AppState.areas.push(area);
-                newIds.push(id);
+        function confirmFitToArc() {
+            if (!_fitArcCtx) return;
+            // Aplica preview una última vez con los valores actuales y persiste.
+            applyFitArcPreview();
+            // Guardar historia ANTES del cambio (snapshot restaurable).
+            // Para hacer history correcto, restauramos el snapshot, guardamos, y volvemos a aplicar.
+            const sel = _fitArcCtx.selected;
+            // Restaurar snapshot temporalmente.
+            const previewShapes = new Map(sel.map(a => [a.id, a.shape ? JSON.parse(JSON.stringify(a.shape)) : null]));
+            const previewPoints = new Map(sel.map(a => [a.id, JSON.parse(JSON.stringify(a.points))]));
+            sel.forEach(a => {
+                const snap = _fitArcCtx.snapshot.get(a.id);
+                if (snap.shape) a.shape = snap.shape; else delete a.shape;
+                a.points = snap.points;
+                if (snap.groupId) a.groupId = snap.groupId;
             });
-            AppState.expandedSectors.add(targetSectorId);
-            AppState.selectedAreaIds = newIds;
-            closeStadiumRingWizard();
+            saveStateToHistory();
+            // Reaplicar el preview.
+            sel.forEach(a => {
+                const sh = previewShapes.get(a.id);
+                if (sh) a.shape = sh; else delete a.shape;
+                a.points = previewPoints.get(a.id);
+                if (a.groupId) delete a.groupId; // sale del grupo curvo legacy si lo tenía
+            });
+            _fitArcCtx = null;
+            document.getElementById('fit-arc-panel').classList.add('hidden');
             renderMap();
             updateUI();
         }
 
-        function createNewArcArea() {
-            saveStateToHistory();
-            const targetSectorId = AppState.selectedSectorId || AppState.sectors[0]?.id || 'default-sec';
-            if (AppState.sectors.length === 0) {
-                AppState.sectors.push({ id: 'default-sec', title: 'Sector General' });
-            }
-            const newId = generateUniqueAreaId();
-            const viewport = document.getElementById('main-viewport');
-            const rect = viewport.getBoundingClientRect();
-            const cx = (rect.width/2 - AppState.panX) / AppState.zoom;
-            const cy = (rect.height/2 - AppState.panY) / AppState.zoom;
-            const shape = ArcMath.clampArcShape(ArcMath.defaultArcShape(cx, cy));
-            const area = {
-                id: newId,
-                title: `Tribuna Arco ${AppState.areaCounter}`,
-                code: `T${AppState.areaCounter}`,
-                sectorId: targetSectorId,
-                shape,
-                points: ArcMath.arcOutlinePoints(shape),
-                rowMin: 1, rowMax: 8, seatMin: 1, seatMax: 12,
-                rowLabelOffset: 0, puerta: ''
+        // Handle draggable del centro del arco (renderizado dentro de renderMap).
+        function startMoveFitArcCenter(e) {
+            if (!_fitArcCtx) return;
+            e.stopPropagation();
+            e.preventDefault();
+            AppState.interactionMode = 'move_fit_arc_center';
+            AppState.initialClickPoint = getMousePos(e);
+            AppState.fitArcCenterInitial = {
+                x: parseFloat(document.getElementById('fit-arc-cx').value),
+                y: parseFloat(document.getElementById('fit-arc-cy').value)
             };
-            AppState.areas.push(area);
-            AppState.expandedSectors.add(targetSectorId);
-            toggleSelection(newId, false);
-            renderMap();
-            updateUI();
         }
 
         // --- 7. Eventos de Mouse ---
@@ -2337,7 +2336,33 @@
             if (!AppState.interactionMode) return;
             const m = getMousePos(e), dx = m.x - AppState.initialClickPoint.x, dy = m.y - AppState.initialClickPoint.y;
             
-            if (AppState.interactionMode === 'move_arc_center') {
+            if (AppState.interactionMode === 'move_fit_arc_center') {
+                if (_fitArcCtx && AppState.fitArcCenterInitial) {
+                    const newX = AppState.fitArcCenterInitial.x + dx;
+                    const newY = AppState.fitArcCenterInitial.y + dy;
+                    document.getElementById('fit-arc-cx').value = Math.round(newX);
+                    document.getElementById('fit-arc-cy').value = Math.round(newY);
+                    // Recompute innerR/outerR/angles preservando tamaño de celda con el nuevo centro
+                    const sel = _fitArcCtx.selected;
+                    const orig = sel.map(a => {
+                        const snap = _fitArcCtx.snapshot.get(a.id);
+                        return {
+                            points: snap.points,
+                            rowMin: a.rowMin, rowMax: a.rowMax,
+                            seatMin: a.seatMin, seatMax: a.seatMax
+                        };
+                    });
+                    const auto = ArcMath.autoFitArcParams(orig, { center: { x: newX, y: newY } });
+                    document.getElementById('fit-arc-radius').value = Math.round(auto.midRadius);
+                    document.getElementById('fit-arc-radius-val').innerText = Math.round(auto.midRadius);
+                    document.getElementById('fit-arc-inner').value = Math.round(auto.innerR);
+                    document.getElementById('fit-arc-outer').value = Math.round(auto.outerR);
+                    document.getElementById('fit-arc-start').value = Math.round(auto.startAngleDeg);
+                    document.getElementById('fit-arc-end').value = Math.round(auto.endAngleDeg);
+                    applyFitArcPreview();
+                }
+                return;
+            } else if (AppState.interactionMode === 'move_arc_center') {
                 const area = AppState.areas.find(ar => ar.id === AppState.activeAreaId);
                 if (area && AppState.initialArcShape) {
                     const init = AppState.initialArcShape;
