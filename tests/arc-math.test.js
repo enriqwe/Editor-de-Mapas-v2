@@ -345,29 +345,99 @@ test('fitGroupAsArc: introduce gap angular entre áreas adyacentes', () => {
     }
 });
 
-test('fitGroupAsArc: sweep_i × midR == naturalWidth_i (ancho preservado)', () => {
+test('fitGroupAsArc: ancho por área = nSeats × seatSpacing uniforme + 2 × margin', () => {
+    // Tres áreas con MISMO seatSpacing natural (5 px/asiento) pero distintos nSeats.
     const areas = [
-        rectAreaForTest(0, 0, 80, 50, 5, 16),    // ancho 80
-        rectAreaForTest(0, 0, 120, 50, 5, 24),   // ancho 120
-        rectAreaForTest(0, 0, 200, 50, 5, 40)    // ancho 200
+        rectAreaForTest(0, 0, 80, 50, 5, 16),    // seatSpacing=5
+        rectAreaForTest(0, 0, 120, 50, 5, 24),   // seatSpacing=5
+        rectAreaForTest(0, 0, 200, 50, 5, 40)    // seatSpacing=5
     ];
     const result = ArcMath.fitGroupAsArc(areas, {
-        center: { x: 0, y: 1000 }, midRadius: 1000, gapDeg: 0, orientationRad: -Math.PI/2
+        center: { x: 0, y: 1000 }, midRadius: 1000, gapDeg: 0, orientationRad: -Math.PI/2,
+        marginRatio: 0
     });
     const midR = (result[0].shape.innerR + result[0].shape.outerR) / 2;
-    [80, 120, 200].forEach((expected, i) => {
+    // Con marginRatio=0, marginPx=max(2, 0)=2, así que cada área añade 4px (2+2).
+    [16, 24, 40].forEach((nSeats, i) => {
+        const expectedWidth = nSeats * 5 + 4; // 5 = seatSpacing uniforme, +4 px margen total
         const sweep = result[i].shape.endAngle - result[i].shape.startAngle;
-        assert.ok(approx(sweep * midR, expected, 1));
+        assert.ok(approx(sweep * midR, expectedWidth, 1),
+            `área ${i}: esperado ${expectedWidth}, obtenido ${sweep * midR}`);
     });
 });
 
-test('fitGroupAsArc: thickness preserva alto de fila', () => {
+test('fitGroupAsArc: seatSpacing uniforme cuando áreas tienen densidades distintas', () => {
+    // Mismo ancho, distinto nº de asientos → seatSpacing distintos.
+    // El grupo debería usar la MEDIANA y todas las áreas heredarla.
+    const areas = [
+        rectAreaForTest(0, 0, 100, 50, 5, 10),   // seatSpacing=10
+        rectAreaForTest(0, 0, 100, 50, 5, 25),   // seatSpacing=4
+        rectAreaForTest(0, 0, 100, 50, 5, 50)    // seatSpacing=2
+    ];
+    const result = ArcMath.fitGroupAsArc(areas, {
+        center: { x: 0, y: 1000 }, midRadius: 1000, gapDeg: 0, marginRatio: 0
+    });
+    // Median seatSpacing = 4. Todos los shapes deberían reportar seatSpacingPx=4.
+    result.forEach(r => assert.equal(r.shape.seatSpacingPx, 4));
+});
+
+test('fitGroupAsArc: thickness preserva alto + 2 × margen', () => {
     const areas = [rectAreaForTest(0, 0, 100, 170, 17, 28)];
     const result = ArcMath.fitGroupAsArc(areas, {
-        center: { x: 0, y: 1000 }, midRadius: 1000, gapDeg: 0
+        center: { x: 0, y: 1000 }, midRadius: 1000, gapDeg: 0, marginRatio: 0
     });
+    // rowSpacing = 170/17 = 10, marginPx = max(2, seatSpacing(=3.57)*0) = 2.
+    // thickness = 17*10 + 2*2 = 174.
     const thick = result[0].shape.outerR - result[0].shape.innerR;
-    assert.ok(approx(thick, 170, 1));
+    assert.ok(approx(thick, 174, 1));
+});
+
+test('arcSeatPos con seatSpacingPx: paso angular constante (no estira a llenar el sweep)', () => {
+    // Área con 3 asientos y sweep grande. Sin seatSpacingPx, los asientos se repartirían
+    // a 1/3 del sweep cada uno. Con seatSpacingPx, deberían ir al paso fijo.
+    const area = {
+        rowMin: 1, rowMax: 1, seatMin: 1, seatMax: 3,
+        shape: {
+            type: 'arc',
+            center: { x: 0, y: 0 },
+            innerR: 100, outerR: 110,
+            startAngle: 0, endAngle: Math.PI / 4, // sweep grande
+            seatSpacingPx: 5,
+            rowSpacingPx: 10,
+            seatMarginPx: 0,
+            rowMarginPx: 0
+        }
+    };
+    const midR = 105;
+    const seatAngle = 5 / midR;
+    // Asiento 1 (seatPos=1): a = 0 + 0 + (0+0.5)*seatAngle = 0.5*5/105
+    const p1 = ArcMath.arcSeatPos(area, 1, 1);
+    const expected = { x: midR * Math.cos(0.5 * seatAngle), y: midR * Math.sin(0.5 * seatAngle) };
+    assert.ok(approx(p1.x, expected.x, 1e-9));
+    assert.ok(approx(p1.y, expected.y, 1e-9));
+});
+
+test('arcSeatPos: cae al modo legacy si el shape no tiene seatSpacingPx', () => {
+    const area = {
+        rowMin: 1, rowMax: 1, seatMin: 1, seatMax: 1,
+        shape: { type: 'arc', center: { x: 0, y: 0 }, innerR: 100, outerR: 120, startAngle: 0, endAngle: Math.PI / 2 }
+    };
+    // Una sola fila, un solo asiento: cae en el centroide del arco.
+    const p = ArcMath.arcSeatPos(area, 1, 1);
+    const c = ArcMath.arcCentroid(area.shape);
+    assert.ok(approxPt(p, c));
+});
+
+test('clampArcShape preserva seatSpacingPx/rowSpacingPx/seatMarginPx/rowMarginPx', () => {
+    const shape = {
+        type: 'arc', center: { x: 0, y: 0 }, innerR: 100, outerR: 120, startAngle: 0, endAngle: 1,
+        seatSpacingPx: 5, rowSpacingPx: 10, seatMarginPx: 2, rowMarginPx: 3
+    };
+    const c = ArcMath.clampArcShape(shape);
+    assert.equal(c.seatSpacingPx, 5);
+    assert.equal(c.rowSpacingPx, 10);
+    assert.equal(c.seatMarginPx, 2);
+    assert.equal(c.rowMarginPx, 3);
 });
 
 test('layAreasFlat: dispone áreas en fila con gap pixelado', () => {

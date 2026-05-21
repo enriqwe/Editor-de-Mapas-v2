@@ -65,12 +65,27 @@
     function arcSeatPos(area, rowPos, seatPos) {
         if (!isArcArea(area)) throw new Error('arcSeatPos: área no es arco');
         const sh = area.shape;
-        const rows = (area.rowMax - area.rowMin + 1) || 1;
-        const seats = (area.seatMax - area.seatMin + 1) || 1;
-        const rowT = (rowPos - area.rowMin + 0.5) / rows;
-        const seatT = (seatPos - area.seatMin + 0.5) / seats;
-        const r = sh.innerR + rowT * (sh.outerR - sh.innerR);
-        const a = sh.startAngle + seatT * (sh.endAngle - sh.startAngle);
+        const midR = (sh.innerR + sh.outerR) / 2;
+        let r, a;
+        if (Number.isFinite(sh.seatSpacingPx) && Number.isFinite(sh.rowSpacingPx)) {
+            // Modo "tamaño de celda constante": el paso entre asientos/filas se
+            // mantiene en píxeles independientemente del nº de asientos del área.
+            // Áreas con menos asientos sólo dejan más margen, no estiran las celdas.
+            const seatMarginPx = sh.seatMarginPx || 0;
+            const rowMarginPx = sh.rowMarginPx || 0;
+            const seatAngle = sh.seatSpacingPx / midR;
+            const marginAngle = seatMarginPx / midR;
+            a = sh.startAngle + marginAngle + ((seatPos - area.seatMin) + 0.5) * seatAngle;
+            r = sh.innerR + rowMarginPx + ((rowPos - area.rowMin) + 0.5) * sh.rowSpacingPx;
+        } else {
+            // Legacy: estirar la grilla hasta llenar todo el sweep del área.
+            const rows = (area.rowMax - area.rowMin + 1) || 1;
+            const seats = (area.seatMax - area.seatMin + 1) || 1;
+            const rowT = (rowPos - area.rowMin + 0.5) / rows;
+            const seatT = (seatPos - area.seatMin + 0.5) / seats;
+            r = sh.innerR + rowT * (sh.outerR - sh.innerR);
+            a = sh.startAngle + seatT * (sh.endAngle - sh.startAngle);
+        }
         return {
             x: sh.center.x + r * Math.cos(a),
             y: sh.center.y + r * Math.sin(a),
@@ -216,9 +231,6 @@
             endAngle: shape.endAngle
         };
         if (out.outerR < out.innerR + minSep) out.outerR = out.innerR + minSep;
-        // No imponemos un sweep mínimo angular: en fitGroupAsArc con midRadius muy grande
-        // los sweeps son legítimamente pequeños (< 1°) y forzarlos al mínimo provocaba
-        // solapamiento masivo entre áreas. Solo evitamos el caso degenerado de sweep=0.
         const sweep = out.endAngle - out.startAngle;
         const maxSweep = 2 * Math.PI;
         if (sweep === 0) {
@@ -226,6 +238,11 @@
         } else if (Math.abs(sweep) > maxSweep) {
             out.endAngle = out.startAngle + (sweep > 0 ? maxSweep : -maxSweep);
         }
+        // Preservar campos opcionales (paso de asiento/fila + márgenes) que controlan
+        // cómo arcSeatPos coloca los asientos sin estirar las celdas.
+        ['seatSpacingPx', 'rowSpacingPx', 'seatMarginPx', 'rowMarginPx'].forEach(k => {
+            if (shape[k] != null) out[k] = shape[k];
+        });
         return out;
     }
 
@@ -443,32 +460,61 @@
      * Todos comparten center/innerR/outerR → acople perfecto.
      */
     function fitGroupAsArc(areas, opts) {
-        const { center, midRadius, gapDeg = 0, gapPx = 0, orientationRad = -Math.PI / 2 } = opts;
+        const {
+            center, midRadius,
+            gapDeg = 0, gapPx = 0,
+            orientationRad = -Math.PI / 2,
+            // marginRatio: fracción del seatSpacing usada como margen alrededor del bloque
+            // de asientos (izq/dcha/arriba/abajo). 0.15 ≈ asientos respiran ligeramente.
+            marginRatio = 0.15
+        } = opts;
         if (!Array.isArray(areas) || areas.length === 0) throw new Error('fitGroupAsArc: areas vacío');
         if (!(midRadius > 0)) throw new Error('fitGroupAsArc: midRadius > 0');
-        const gap = degToRad(gapDeg) + (gapPx / midRadius);
+
         const stats = areas.map(a => {
             const sz = computeAreaNaturalSize(a);
             const nRows = (a.rowMax - a.rowMin + 1) || 1;
-            return { naturalWidth: sz.width, rowSpacing: sz.height / nRows, nRows };
+            const nSeats = (a.seatMax - a.seatMin + 1) || 1;
+            return {
+                seatSpacing: sz.width / nSeats,
+                rowSpacing: sz.height / nRows,
+                nRows, nSeats
+            };
         });
+
+        // Paso de celda UNIFORME para todo el grupo (mediana de los pasos naturales).
+        // Esto evita que áreas con más asientos tengan asientos más pequeños.
+        const seatSpacing = median(stats.map(s => s.seatSpacing));
         const rowSpacing = median(stats.map(s => s.rowSpacing));
         const maxRows = Math.max(...stats.map(s => s.nRows));
-        const thickness = maxRows * rowSpacing;
+        const marginPx = Math.max(2, seatSpacing * marginRatio);
+
+        const thickness = maxRows * rowSpacing + 2 * marginPx;
         const innerR = Math.max(1, midRadius - thickness / 2);
         const outerR = innerR + thickness;
-        const totalNaturalWidth = stats.reduce((s, x) => s + x.naturalWidth, 0);
-        const totalSweep = totalNaturalWidth / midRadius + (areas.length - 1) * gap;
+
+        // Ancho por área = nº asientos × paso uniforme + 2 × margen
+        const widths = stats.map(s => s.nSeats * seatSpacing + 2 * marginPx);
+        const totalWidth = widths.reduce((acc, w) => acc + w, 0);
+
+        const gap = degToRad(gapDeg) + (gapPx / midRadius);
+        const totalSweep = totalWidth / midRadius + (areas.length - 1) * gap;
         const startAngle = orientationRad - totalSweep / 2;
+
         let cursor = startAngle;
         return areas.map((a, i) => {
-            const sweep = stats[i].naturalWidth / midRadius;
+            const sweep = widths[i] / midRadius;
             const shape = {
                 type: 'arc',
                 center: { x: center.x, y: center.y },
                 innerR, outerR,
                 startAngle: cursor,
-                endAngle: cursor + sweep
+                endAngle: cursor + sweep,
+                // Campos opcionales que arcSeatPos usará para no estirar las celdas.
+                seatSpacingPx: seatSpacing,
+                rowSpacingPx: rowSpacing,
+                seatMarginPx: marginPx,
+                rowMarginPx: marginPx
             };
             cursor += sweep + gap;
             return { id: a.id, shape };
