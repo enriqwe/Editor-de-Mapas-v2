@@ -541,8 +541,6 @@
             center, midRadius,
             gapDeg = 0, gapPx = 0,
             orientationRad = -Math.PI / 2,
-            // marginRatio: fracción del seatSpacing usada como margen alrededor del bloque
-            // de asientos (izq/dcha/arriba/abajo). 0.15 ≈ asientos respiran ligeramente.
             marginRatio = 0.15
         } = opts;
         if (!Array.isArray(areas) || areas.length === 0) throw new Error('fitGroupAsArc: areas vacío');
@@ -555,14 +553,18 @@
             return {
                 seatSpacing: sz.width / nSeats,
                 rowSpacing: sz.height / nRows,
-                nRows, nSeats
+                nRows, nSeats,
+                isWedge: !!a.isWedge,
+                naturalWidth: sz.width
             };
         });
 
-        // Paso de celda UNIFORME para todo el grupo (mediana de los pasos naturales).
-        // Esto evita que áreas con más asientos tengan asientos más pequeños.
-        const seatSpacing = median(stats.map(s => s.seatSpacing));
-        const rowSpacing = median(stats.map(s => s.rowSpacing));
+        // Para calcular el seatSpacing/rowSpacing UNIFORMES, excluimos las cuñas:
+        // sus dimensiones suelen ser irregulares y romperían la mediana.
+        const referenceStats = stats.filter(s => !s.isWedge);
+        const spacingSource = referenceStats.length > 0 ? referenceStats : stats;
+        const seatSpacing = median(spacingSource.map(s => s.seatSpacing));
+        const rowSpacing = median(spacingSource.map(s => s.rowSpacing));
         const maxRows = Math.max(...stats.map(s => s.nRows));
         const marginPx = Math.max(2, seatSpacing * marginRatio);
 
@@ -570,8 +572,12 @@
         const innerR = Math.max(1, midRadius - thickness / 2);
         const outerR = innerR + thickness;
 
-        // Ancho por área = nº asientos × paso uniforme + 2 × margen
-        const widths = stats.map(s => s.nSeats * seatSpacing + 2 * marginPx);
+        // Ancho por área:
+        //  - No-cuña: nSeats × paso uniforme + 2 × margen (todos los seats al mismo tamaño)
+        //  - Cuña: su ancho natural (bbox.width) → reserva el slot que necesita.
+        const widths = stats.map(s => s.isWedge
+            ? s.naturalWidth
+            : s.nSeats * seatSpacing + 2 * marginPx);
         const totalWidth = widths.reduce((acc, w) => acc + w, 0);
 
         const gap = degToRad(gapDeg) + (gapPx / midRadius);
@@ -580,21 +586,32 @@
 
         let cursor = startAngle;
         return areas.map((a, i) => {
+            const s = stats[i];
             const sweep = widths[i] / midRadius;
+            const slot = {
+                center: { x: center.x, y: center.y },
+                innerR, outerR,
+                startAngle: cursor,
+                endAngle: cursor + sweep
+            };
+            cursor += sweep + gap;
+            if (s.isWedge) {
+                // Cuña: devolvemos solo el slot (sin shape). El llamante posicionará
+                // el polígono original dentro del slot.
+                return { id: a.id, isWedge: true, slot };
+            }
             const shape = {
                 type: 'arc',
                 center: { x: center.x, y: center.y },
                 innerR, outerR,
-                startAngle: cursor,
-                endAngle: cursor + sweep,
-                // Campos opcionales que arcSeatPos usará para no estirar las celdas.
+                startAngle: slot.startAngle,
+                endAngle: slot.endAngle,
                 seatSpacingPx: seatSpacing,
                 rowSpacingPx: rowSpacing,
                 seatMarginPx: marginPx,
                 rowMarginPx: marginPx
             };
-            cursor += sweep + gap;
-            return { id: a.id, shape };
+            return { id: a.id, isWedge: false, slot, shape };
         });
     }
 

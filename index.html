@@ -43,6 +43,10 @@
         .area-polygon.multi-selected {
             stroke: #2563eb !important; stroke-width: 3px !important; stroke-dasharray: 4,4;
         }
+        .area-polygon.wedge-marked {
+            stroke: #9333ea !important; stroke-width: 3px !important; stroke-dasharray: 6,3;
+            fill: rgba(168,85,247,0.08) !important;
+        }
         .area-label {
             font-family: sans-serif; font-weight: bold; font-size: 14px; fill: #1f2937;
             pointer-events: none; text-shadow: 0px 1px 2px rgba(255,255,255,0.8);
@@ -536,8 +540,9 @@
             <h2 class="font-bold text-sm text-pink-700 flex items-center gap-1"><i data-lucide="git-commit" class="w-4 h-4"></i> Acoplar a arco</h2>
             <button onclick="closeFitToArcPanel()" class="text-gray-500 hover:text-gray-700"><i data-lucide="x" class="w-4 h-4"></i></button>
         </div>
-        <div class="p-3 text-xs text-gray-600">
-            <span id="fit-arc-count" class="font-bold text-gray-800">0</span> áreas seleccionadas. <span class="text-purple-600 font-medium">Arrastra el punto morado</span> sobre el mapa para mover el centro del arco.
+        <div class="p-3 text-xs text-gray-600 space-y-1">
+            <div><span id="fit-arc-count" class="font-bold text-gray-800">0</span> áreas seleccionadas. <span class="text-purple-600 font-medium">Arrastra el punto morado</span> sobre el mapa para mover el centro del arco.</div>
+            <div class="text-[11px] text-gray-500"><span class="text-purple-700 font-medium">Ctrl+click</span> sobre un área para marcarla como cuña (conserva su polígono original en lugar de convertirse en arco).</div>
         </div>
         <div class="p-3 space-y-3 text-sm border-t">
             <div>
@@ -1650,7 +1655,8 @@
                     poly.setAttribute("points", area.points.map(p => `${p.x},${p.y}`).join(" "));
                 }
                 poly.setAttribute("style", `fill: ${colors.fill}; stroke: ${colors.stroke};`);
-                poly.className.baseVal = `area-polygon ${isSelected ? (AppState.selectedAreaIds.length > 1 && !isIsolated ? "multi-selected" : "selected") : ""}`;
+                const isWedgeMarked = _fitArcCtx && _fitArcCtx.wedgeIds && _fitArcCtx.wedgeIds.has(area.id);
+                poly.className.baseVal = `area-polygon ${isSelected ? (AppState.selectedAreaIds.length > 1 && !isIsolated ? "multi-selected" : "selected") : ""}${isWedgeMarked ? " wedge-marked" : ""}`;
 
                 poly.addEventListener('mousedown', (e) => {
                     if (AppState.curveAlignment && AppState.curveAlignment.active) return;
@@ -2065,7 +2071,15 @@
             // línea recta a 100%.
             const frontDir = ArcMath.averageFrontDirection(sel) || { x: 0, y: 1 };
 
-            _fitArcCtx = { selected: sel, snapshot, totalArcLen: totalNaturalWidth, selCenter, frontDir };
+            // Si todas las áreas seleccionadas pertenecen a un mismo grupo y algunas son
+            // polígonos (no arcos), las marcamos automáticamente como cuñas de inicio: vienen
+            // de un acoplamiento anterior donde ya estaban marcadas.
+            const wedgeIds = new Set();
+            const sharedGroup = sel.every(a => a.groupId === sel[0].groupId) && sel[0].groupId;
+            if (sharedGroup) {
+                sel.forEach(a => { if (!isArc(a)) wedgeIds.add(a.id); });
+            }
+            _fitArcCtx = { selected: sel, snapshot, totalArcLen: totalNaturalWidth, selCenter, frontDir, wedgeIds };
 
             let initialPct, cx, cy;
             if (allArcSameGroup) {
@@ -2131,10 +2145,12 @@
             const sel = _fitArcCtx.selected;
             // Trabajamos siempre con áreas tal y como estaban en el snapshot
             // (rectángulos naturales o arco previo) para que la operación sea idempotente.
+            const wedgeIds = _fitArcCtx.wedgeIds || new Set();
             const baseAreas = sel.map(a => {
                 const snap = _fitArcCtx.snapshot.get(a.id);
                 return { id: a.id, points: snap.points, shape: snap.shape || undefined,
-                    rowMin: a.rowMin, rowMax: a.rowMax, seatMin: a.seatMin, seatMax: a.seatMax };
+                    rowMin: a.rowMin, rowMax: a.rowMax, seatMin: a.seatMin, seatMax: a.seatMax,
+                    isWedge: wedgeIds.has(a.id) };
             });
             const ordered = sortByX
                 ? [...baseAreas].sort((a, b) => {
@@ -2194,23 +2210,67 @@
                 gapPx: 4,
                 orientationRad
             });
-            const byId = new Map(result.map(r => [r.id, r.shape]));
+            const byId = new Map(result.map(r => [r.id, r]));
             sel.forEach(area => {
-                const shape = byId.get(area.id);
-                if (!shape) return;
-                area.shape = ArcMath.clampArcShape(shape);
-                syncArcPoints(area);
-                // Al pasar a arco, seatGrid no aplica (la rejilla la define el shape arco).
-                delete area.seatGrid;
+                const r = byId.get(area.id);
+                if (!r) return;
+                const snap = _fitArcCtx.snapshot.get(area.id);
+                if (r.isWedge) {
+                    // Posicionar el polígono original de la cuña en el slot reservado,
+                    // alineando su flecha (front) con el radio inward del slot.
+                    const slot = r.slot;
+                    const midAngle = (slot.startAngle + slot.endAngle) / 2;
+                    const midR = (slot.innerR + slot.outerR) / 2;
+                    const slotCentroid = {
+                        x: slot.center.x + midR * Math.cos(midAngle),
+                        y: slot.center.y + midR * Math.sin(midAngle)
+                    };
+                    // Dirección "hacia el campo" del slot = desde el centroide del slot al centro del arco.
+                    let sfx = slot.center.x - slotCentroid.x;
+                    let sfy = slot.center.y - slotCentroid.y;
+                    const sfl = Math.hypot(sfx, sfy) || 1;
+                    sfx /= sfl; sfy /= sfl;
+
+                    const origFront = ArcMath.computeFrontDirection({ points: snap.points });
+                    const origCentroid = getCentroid(snap.points);
+                    const origAngle = Math.atan2(origFront.y, origFront.x);
+                    const targetAngle = Math.atan2(sfy, sfx);
+                    const rotation = targetAngle - origAngle;
+
+                    const dx = slotCentroid.x - origCentroid.x;
+                    const dy = slotCentroid.y - origCentroid.y;
+                    const cos = Math.cos(rotation), sin = Math.sin(rotation);
+                    area.points = snap.points.map(p => {
+                        const tx = p.x + dx, ty = p.y + dy;
+                        return {
+                            x: slotCentroid.x + (tx - slotCentroid.x) * cos - (ty - slotCentroid.y) * sin,
+                            y: slotCentroid.y + (tx - slotCentroid.x) * sin + (ty - slotCentroid.y) * cos
+                        };
+                    });
+                    // Misma transformación al seatGrid de la cuña (o se deriva si no existía).
+                    if (snap.seatGrid) {
+                        let g = ArcMath.translateSeatGrid(snap.seatGrid, dx, dy);
+                        g = ArcMath.rotateSeatGrid(g, slotCentroid.x, slotCentroid.y, rotation);
+                        area.seatGrid = g;
+                    } else if (area.points.length >= 4) {
+                        area.seatGrid = ArcMath.computeSeatGridFromPolygon(area);
+                    }
+                    delete area.shape;
+                } else {
+                    area.shape = ArcMath.clampArcShape(r.shape);
+                    syncArcPoints(area);
+                    delete area.seatGrid;
+                }
             });
-            // Sincronizamos los campos avanzados.
-            const sh0 = result[0].shape;
+            // Sincronizamos los campos avanzados con el primer slot disponible (para visibilidad).
+            const sh0 = (result.find(r => r.shape) || {}).shape;
+            if (!sh0) { renderMap(); return; }
             document.getElementById('fit-arc-cx').value = Math.round(adjCx);
             document.getElementById('fit-arc-cy').value = Math.round(adjCy);
             document.getElementById('fit-arc-inner').value = Math.round(sh0.innerR);
             document.getElementById('fit-arc-outer').value = Math.round(sh0.outerR);
-            document.getElementById('fit-arc-start').value = Math.round(ArcMath.radToDeg(result[0].shape.startAngle));
-            document.getElementById('fit-arc-end').value = Math.round(ArcMath.radToDeg(result[result.length-1].shape.endAngle));
+            document.getElementById('fit-arc-start').value = Math.round(ArcMath.radToDeg(result[0].slot.startAngle));
+            document.getElementById('fit-arc-end').value = Math.round(ArcMath.radToDeg(result[result.length-1].slot.endAngle));
             renderMap();
         }
 
@@ -2276,6 +2336,14 @@
         function startMoveArea(e, area) {
             e.stopPropagation();
             e.preventDefault();
+            // En modo "Acoplar a arco": Ctrl+click marca/desmarca un área como cuña.
+            if (_fitArcCtx && (e.ctrlKey || e.metaKey) && _fitArcCtx.selected.some(a => a.id === area.id)) {
+                if (!_fitArcCtx.wedgeIds) _fitArcCtx.wedgeIds = new Set();
+                if (_fitArcCtx.wedgeIds.has(area.id)) _fitArcCtx.wedgeIds.delete(area.id);
+                else _fitArcCtx.wedgeIds.add(area.id);
+                applyFitArcPreview();
+                return;
+            }
             saveStateToHistory();
             
             // Lógica de Selección de Grupos o Aislamiento.
