@@ -235,6 +235,94 @@ test('buildRingSegments: tribuna parcial (90° en 3 segs) cubre exactamente 90°
     assert.ok(approx(shapes[shapes.length - 1].endAngle, ArcMath.degToRad(45), 1e-9));
 });
 
+// -------- fitAreasToArc --------
+test('fitAreasToArc: bordes contiguos sin huecos (endAngle[i] = startAngle[i+1])', () => {
+    const areas = [
+        { id: 'a', seatMin: 1, seatMax: 20 },
+        { id: 'b', seatMin: 1, seatMax: 20 },
+        { id: 'c', seatMin: 1, seatMax: 20 }
+    ];
+    const result = ArcMath.fitAreasToArc(areas, {
+        center: { x: 0, y: 0 }, innerR: 100, outerR: 150,
+        startAngleDeg: 0, endAngleDeg: 90
+    });
+    assert.equal(result.length, 3);
+    for (let i = 1; i < result.length; i++) {
+        assert.ok(approx(result[i - 1].shape.endAngle, result[i].shape.startAngle, 1e-9),
+            `huecos entre ${i - 1} y ${i}`);
+    }
+});
+
+test('fitAreasToArc: distribución proporcional a #asientos', () => {
+    const areas = [
+        { id: 'small', seatMin: 1, seatMax: 5 },   // 5 asientos
+        { id: 'big',   seatMin: 1, seatMax: 25 }   // 25 asientos → 5x más sweep
+    ];
+    const result = ArcMath.fitAreasToArc(areas, {
+        center: { x: 0, y: 0 }, innerR: 100, outerR: 150,
+        startAngleDeg: 0, endAngleDeg: 60
+    });
+    const sweepSmall = result[0].shape.endAngle - result[0].shape.startAngle;
+    const sweepBig = result[1].shape.endAngle - result[1].shape.startAngle;
+    assert.ok(approx(sweepBig / sweepSmall, 5, 1e-9));
+});
+
+test('fitAreasToArc: distribución equal reparte por igual', () => {
+    const areas = [
+        { id: 'a', seatMin: 1, seatMax: 5 },
+        { id: 'b', seatMin: 1, seatMax: 25 }
+    ];
+    const result = ArcMath.fitAreasToArc(areas, {
+        center: { x: 0, y: 0 }, innerR: 100, outerR: 150,
+        startAngleDeg: 0, endAngleDeg: 60,
+        distribution: 'equal'
+    });
+    const sweepA = result[0].shape.endAngle - result[0].shape.startAngle;
+    const sweepB = result[1].shape.endAngle - result[1].shape.startAngle;
+    assert.ok(approx(sweepA, sweepB, 1e-9));
+});
+
+test('fitAreasToArc: cubre exactamente el rango total', () => {
+    const areas = Array.from({ length: 5 }, (_, i) => ({ id: `a${i}`, seatMin: 1, seatMax: 10 }));
+    const result = ArcMath.fitAreasToArc(areas, {
+        center: { x: 100, y: 200 }, innerR: 50, outerR: 80,
+        startAngleDeg: -45, endAngleDeg: 45
+    });
+    assert.ok(approx(result[0].shape.startAngle, ArcMath.degToRad(-45), 1e-9));
+    assert.ok(approx(result[result.length - 1].shape.endAngle, ArcMath.degToRad(45), 1e-9));
+});
+
+test('fitAreasToArc: todas las áreas comparten center/innerR/outerR (acople perfecto garantizado)', () => {
+    const areas = [
+        { id: 'a', seatMin: 1, seatMax: 10 },
+        { id: 'b', seatMin: 1, seatMax: 10 }
+    ];
+    const result = ArcMath.fitAreasToArc(areas, {
+        center: { x: 50, y: 60 }, innerR: 100, outerR: 150,
+        startAngleDeg: 0, endAngleDeg: 30
+    });
+    result.forEach(r => {
+        assert.equal(r.shape.center.x, 50);
+        assert.equal(r.shape.center.y, 60);
+        assert.equal(r.shape.innerR, 100);
+        assert.equal(r.shape.outerR, 150);
+    });
+});
+
+test('fitAreasToArc: lanza si innerR/outerR inválidos', () => {
+    assert.throws(() => ArcMath.fitAreasToArc([{ id: 'a', seatMin: 1, seatMax: 5 }], {
+        center: { x: 0, y: 0 }, innerR: 0, outerR: 100, startAngleDeg: 0, endAngleDeg: 30
+    }));
+    assert.throws(() => ArcMath.fitAreasToArc([{ id: 'a', seatMin: 1, seatMax: 5 }], {
+        center: { x: 0, y: 0 }, innerR: 100, outerR: 50, startAngleDeg: 0, endAngleDeg: 30
+    }));
+});
+
+test('fitAreasToArc: lista vacía → []', () => {
+    const result = ArcMath.fitAreasToArc([], { center: { x: 0, y: 0 }, innerR: 1, outerR: 2 });
+    assert.deepEqual(result, []);
+});
+
 // -------- parseAreaShape / serializeAreaShape --------
 test('parseAreaShape: array legacy → polygon', () => {
     const r = ArcMath.parseAreaShape(JSON.stringify([{ x: 0, y: 0 }, { x: 10, y: 0 }]));

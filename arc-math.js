@@ -241,6 +241,62 @@
     }
 
     /**
+     * Acopla N áreas en un arco compartiendo `center`, `innerR`, `outerR`.
+     * Cada área recibe una rebanada angular contigua a la anterior (sin huecos)
+     * proporcional a su número de asientos (o equal si distribution='equal').
+     *
+     * Entrada:
+     *  - areas: [{ id, seatMin, seatMax, ... }] – se respetan en orden
+     *  - opts: { center, innerR, outerR, startAngleDeg, endAngleDeg, distribution }
+     *      distribution: 'seats' (defecto) | 'equal'
+     *
+     * Salida: array de mismo length que `areas`, cada elemento:
+     *   { id, shape: {type:'arc', center, innerR, outerR, startAngle, endAngle} }
+     */
+    function fitAreasToArc(areas, opts) {
+        if (!Array.isArray(areas) || areas.length === 0) return [];
+        const {
+            center,
+            innerR,
+            outerR,
+            startAngleDeg = 0,
+            endAngleDeg = 60,
+            distribution = 'seats'
+        } = opts || {};
+        if (!(innerR > 0)) throw new Error('fitAreasToArc: innerR > 0');
+        if (!(outerR > innerR)) throw new Error('fitAreasToArc: outerR > innerR');
+
+        const startAngle = degToRad(startAngleDeg);
+        const endAngle = degToRad(endAngleDeg);
+        const total = endAngle - startAngle;
+
+        const weights = areas.map(a => {
+            if (distribution === 'equal') return 1;
+            const seats = (a.seatMax - a.seatMin + 1);
+            return Math.max(1, seats);
+        });
+        const totalW = weights.reduce((s, w) => s + w, 0);
+
+        const result = [];
+        let cursor = startAngle;
+        for (let i = 0; i < areas.length; i++) {
+            const sweep = total * (weights[i] / totalW);
+            result.push({
+                id: areas[i].id,
+                shape: {
+                    type: 'arc',
+                    center: { x: center.x, y: center.y },
+                    innerR, outerR,
+                    startAngle: cursor,
+                    endAngle: cursor + sweep
+                }
+            });
+            cursor += sweep;
+        }
+        return result;
+    }
+
+    /**
      * Migración de AREA SHAPE en CSV. Acepta:
      *   - array de puntos (legacy): [{x,y},...]
      *   - objeto {type:'polygon', points:[...]}
@@ -275,7 +331,7 @@
         arcOutlinePoints, arcPathD, arcCentroid, arcSeatPos,
         degToRad, radToDeg, normalizeAngle,
         arcsAreCompatible, findSnapAngle, findSnapRadius,
-        buildRingSegments,
+        buildRingSegments, fitAreasToArc,
         defaultArcShape, clampArcShape,
         angleFromPoint, radiusFromPoint,
         parseAreaShape, serializeAreaShape
