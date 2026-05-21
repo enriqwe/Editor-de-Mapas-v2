@@ -6,6 +6,7 @@
     <title>Gestor de Asientos de Estadio</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="arc-math.js"></script>
     <style>
         body { overflow: hidden; }
         
@@ -314,7 +315,7 @@
                             <input type="text" id="prop-code" class="w-full mt-1 border-gray-300 rounded-md shadow-sm border p-1" oninput="updateSelectedAreaFromForm()">
                         </div>
                     </div>
-                    <div class="grid grid-cols-2 gap-2">
+                    <div id="prop-rect-dims" class="grid grid-cols-2 gap-2">
                         <div>
                             <label class="block text-xs font-medium text-gray-500">Ancho (px)</label>
                             <input type="number" id="prop-width" class="w-full mt-1 border-gray-300 rounded-md shadow-sm border p-1" onchange="updateAreaDimensions()">
@@ -322,6 +323,45 @@
                         <div>
                             <label class="block text-xs font-medium text-gray-500">Alto (px)</label>
                             <input type="number" id="prop-height" class="w-full mt-1 border-gray-300 rounded-md shadow-sm border p-1" onchange="updateAreaDimensions()">
+                        </div>
+                    </div>
+                    <div id="prop-arc-block" class="hidden bg-purple-50 border border-purple-200 rounded p-2 space-y-2">
+                        <div class="text-[10px] font-bold text-purple-600 uppercase flex items-center gap-1">
+                            <i data-lucide="git-commit" class="w-3 h-3"></i> Parámetros del arco
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-[10px] font-medium text-gray-500">Centro X</label>
+                                <input type="number" id="prop-arc-cx" class="w-full mt-0.5 border-gray-300 rounded-md shadow-sm border p-1 text-xs" onchange="updateArcFromForm()">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-medium text-gray-500">Centro Y</label>
+                                <input type="number" id="prop-arc-cy" class="w-full mt-0.5 border-gray-300 rounded-md shadow-sm border p-1 text-xs" onchange="updateArcFromForm()">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-medium text-gray-500">Radio interior</label>
+                                <input type="number" id="prop-arc-inner" class="w-full mt-0.5 border-gray-300 rounded-md shadow-sm border p-1 text-xs" onchange="updateArcFromForm()">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-medium text-gray-500">Radio exterior</label>
+                                <input type="number" id="prop-arc-outer" class="w-full mt-0.5 border-gray-300 rounded-md shadow-sm border p-1 text-xs" onchange="updateArcFromForm()">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-medium text-gray-500">Ángulo inicio (°)</label>
+                                <input type="number" id="prop-arc-start" class="w-full mt-0.5 border-gray-300 rounded-md shadow-sm border p-1 text-xs" onchange="updateArcFromForm()">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-medium text-gray-500">Ángulo fin (°)</label>
+                                <input type="number" id="prop-arc-end" class="w-full mt-0.5 border-gray-300 rounded-md shadow-sm border p-1 text-xs" onchange="updateArcFromForm()">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-medium text-gray-500">Filas</label>
+                                <input type="number" id="prop-arc-rows" min="1" class="w-full mt-0.5 border-gray-300 rounded-md shadow-sm border p-1 text-xs" onchange="updateArcRowsSeats()">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-medium text-gray-500">Asientos</label>
+                                <input type="number" id="prop-arc-seats" min="1" class="w-full mt-0.5 border-gray-300 rounded-md shadow-sm border p-1 text-xs" onchange="updateArcRowsSeats()">
+                            </div>
                         </div>
                     </div>
                     <div>
@@ -342,6 +382,7 @@
                     <div class="flex gap-1">
                         <button onclick="createNewSector()" class="text-indigo-600 border border-indigo-200 bg-white px-2 py-1 rounded shadow-sm text-xs font-bold">+ Sec</button>
                         <button onclick="createNewArea()" class="text-blue-600 border border-blue-200 bg-white px-2 py-1 rounded shadow-sm text-xs font-bold">+ Área</button>
+                        <button onclick="createNewArcArea()" class="text-purple-600 border border-purple-200 bg-white px-2 py-1 rounded shadow-sm text-xs font-bold" title="Crea un área tipo arco (tribuna curva)">+ Arco</button>
                     </div>
                 </div>
                 <div id="tree-list" class="space-y-1 pb-4"></div>
@@ -967,66 +1008,15 @@
             return id;
         }
 
-        // ---------- ARC SHAPE HELPERS (Fase 1) ----------
-        // Convención: ángulos en radianes, 0 = eje +X, positivo = sentido horario (SVG, Y invertido).
-        // Fila rowMin = arco interior (innerR), fila rowMax = arco exterior (outerR).
-        function isArc(area) { return !!(area && area.shape && area.shape.type === 'arc'); }
+        // ---------- ARC SHAPE HELPERS (delegan en arc-math.js) ----------
+        const isArc = (area) => ArcMath.isArcArea(area);
+        const arcOutlinePoints = ArcMath.arcOutlinePoints;
+        const arcPathD = ArcMath.arcPathD;
+        const arcCentroid = ArcMath.arcCentroid;
+        const arcSeatPos = ArcMath.arcSeatPos;
 
-        function arcOutlinePoints(shape, segments) {
-            segments = segments || 24;
-            const pts = [];
-            const { center, innerR, outerR, startAngle, endAngle } = shape;
-            for (let i = 0; i <= segments; i++) {
-                const t = i / segments;
-                const a = startAngle + t * (endAngle - startAngle);
-                pts.push({ x: center.x + outerR * Math.cos(a), y: center.y + outerR * Math.sin(a) });
-            }
-            for (let i = segments; i >= 0; i--) {
-                const t = i / segments;
-                const a = startAngle + t * (endAngle - startAngle);
-                pts.push({ x: center.x + innerR * Math.cos(a), y: center.y + innerR * Math.sin(a) });
-            }
-            return pts;
-        }
-
-        function arcPathD(shape) {
-            const { center, innerR, outerR, startAngle, endAngle } = shape;
-            const sweep = endAngle - startAngle;
-            const large = Math.abs(sweep) > Math.PI ? 1 : 0;
-            const sf = sweep > 0 ? 1 : 0;
-            const isf = sweep > 0 ? 0 : 1;
-            const p1 = { x: center.x + innerR * Math.cos(startAngle), y: center.y + innerR * Math.sin(startAngle) };
-            const p2 = { x: center.x + outerR * Math.cos(startAngle), y: center.y + outerR * Math.sin(startAngle) };
-            const p3 = { x: center.x + outerR * Math.cos(endAngle), y: center.y + outerR * Math.sin(endAngle) };
-            const p4 = { x: center.x + innerR * Math.cos(endAngle), y: center.y + innerR * Math.sin(endAngle) };
-            return `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y} A ${outerR} ${outerR} 0 ${large} ${sf} ${p3.x} ${p3.y} L ${p4.x} ${p4.y} A ${innerR} ${innerR} 0 ${large} ${isf} ${p1.x} ${p1.y} Z`;
-        }
-
-        function arcCentroid(shape) {
-            const a = (shape.startAngle + shape.endAngle) / 2;
-            const r = (shape.innerR + shape.outerR) / 2;
-            return { x: shape.center.x + r * Math.cos(a), y: shape.center.y + r * Math.sin(a) };
-        }
-
-        // Devuelve {x, y, angleDeg} para el asiento (rowPos, seatPos) dentro del arco.
-        function arcSeatPos(area, rowPos, seatPos) {
-            const sh = area.shape;
-            const rows = (area.rowMax - area.rowMin + 1) || 1;
-            const seats = (area.seatMax - area.seatMin + 1) || 1;
-            const rowT = (rowPos - area.rowMin + 0.5) / rows;
-            const seatT = (seatPos - area.seatMin + 0.5) / seats;
-            const r = sh.innerR + rowT * (sh.outerR - sh.innerR);
-            const a = sh.startAngle + seatT * (sh.endAngle - sh.startAngle);
-            return {
-                x: sh.center.x + r * Math.cos(a),
-                y: sh.center.y + r * Math.sin(a),
-                angleDeg: ((a + Math.PI / 2) * 180 / Math.PI)
-            };
-        }
-
-        // Refresca area.points (aproximación poligonal) tras cambiar el shape de arco.
         function syncArcPoints(area) {
-            if (isArc(area)) area.points = arcOutlinePoints(area.shape);
+            if (isArc(area)) area.points = ArcMath.arcOutlinePoints(area.shape);
         }
 
         // Helper de consola para Fase 1 (sin UI todavía).
@@ -1240,18 +1230,9 @@
                 if (!area) {
                     let restoredPoints = null;
                     let restoredShape = null;
-                    if (savedShape) {
-                        try {
-                            const parsed = JSON.parse(savedShape);
-                            if (Array.isArray(parsed)) {
-                                restoredPoints = parsed;
-                            } else if (parsed && parsed.type === 'polygon' && Array.isArray(parsed.points)) {
-                                restoredPoints = parsed.points;
-                            } else if (parsed && parsed.type === 'arc') {
-                                restoredShape = parsed;
-                            }
-                        } catch(e) {}
-                    }
+                    const parsedShape = ArcMath.parseAreaShape(savedShape);
+                    if (parsedShape.kind === 'polygon') restoredPoints = parsedShape.points;
+                    else if (parsedShape.kind === 'arc') restoredShape = parsedShape.shape;
                     area = {
                         id: areaId, title: areaTitle, code: areaCode, sectorId: secId,
                         rowMin: rowPos, rowMax: rowPos, seatMin: seatPos, seatMax: seatPos,
@@ -1333,7 +1314,7 @@
                 const parentSector = AppState.sectors.find(s => s.id === area.sectorId);
                 areaSeats.forEach(seat => {
                     const posStr = `${Math.round(area.points[0].x)},${Math.round(area.points[0].y)}`;
-                    const shapeStr = isArc(area) ? JSON.stringify(area.shape) : JSON.stringify(area.points);
+                    const shapeStr = ArcMath.serializeAreaShape(area);
                     const grpId = area.groupId || '';
                     const grpDataStr = grpId && AppState.groups[grpId] ? JSON.stringify(AppState.groups[grpId]) : '';
                     
@@ -1664,7 +1645,31 @@
                     g.appendChild(arrow);
                 }
 
-                // Tiradores individuales (solo para áreas polígono — los arcos tendrán handles propios en Fase 2)
+                // Handles para arcos (Fase 2): 4 endpoints (inner/outer × start/end) + marcador de centro
+                if (isArc(area) && isActive && (!AppState.curveAlignment || !AppState.curveAlignment.active) && (!AppState.activeGroupId || isIsolated)) {
+                    const sh = area.shape;
+                    const handles = [
+                        { which: 'startInner', x: sh.center.x + sh.innerR * Math.cos(sh.startAngle), y: sh.center.y + sh.innerR * Math.sin(sh.startAngle) },
+                        { which: 'startOuter', x: sh.center.x + sh.outerR * Math.cos(sh.startAngle), y: sh.center.y + sh.outerR * Math.sin(sh.startAngle) },
+                        { which: 'endInner', x: sh.center.x + sh.innerR * Math.cos(sh.endAngle), y: sh.center.y + sh.innerR * Math.sin(sh.endAngle) },
+                        { which: 'endOuter', x: sh.center.x + sh.outerR * Math.cos(sh.endAngle), y: sh.center.y + sh.outerR * Math.sin(sh.endAngle) }
+                    ];
+                    handles.forEach(h => {
+                        const ch = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                        ch.setAttribute("cx", h.x); ch.setAttribute("cy", h.y); ch.setAttribute("r", 6);
+                        ch.className.baseVal = "corner-handle";
+                        ch.addEventListener('mousedown', (e) => startMoveArcHandle(e, area, h.which));
+                        g.appendChild(ch);
+                    });
+                    const cc = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                    cc.setAttribute("cx", sh.center.x); cc.setAttribute("cy", sh.center.y); cc.setAttribute("r", 5);
+                    cc.setAttribute("fill", "#9333ea"); cc.setAttribute("stroke", "#fff"); cc.setAttribute("stroke-width", 2);
+                    cc.style.cursor = 'move';
+                    cc.addEventListener('mousedown', (e) => startMoveArcCenter(e, area));
+                    g.appendChild(cc);
+                }
+
+                // Tiradores individuales (solo para áreas polígono)
                 if (!isArc(area) && isActive && (!AppState.curveAlignment || !AppState.curveAlignment.active) && (!AppState.activeGroupId || isIsolated)) {
                     area.points.forEach((p, i) => {
                         const ch = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -1852,7 +1857,7 @@
             const newId = generateUniqueAreaId();
             const viewport = document.getElementById('main-viewport');
             const rect = viewport.getBoundingClientRect();
-            const offset = (AppState.areas.length % 10) * 20; 
+            const offset = (AppState.areas.length % 10) * 20;
             const startX = (rect.width/2 - AppState.panX) / AppState.zoom + offset;
             const startY = (rect.height/2 - AppState.panY) / AppState.zoom + offset;
             AppState.areas.push({
@@ -1860,9 +1865,38 @@
                 points: [{x:startX,y:startY},{x:startX+100,y:startY},{x:startX+100,y:startY+50},{x:startX,y:startY+50}],
                 rowMin: 1, rowMax: 5, seatMin: 1, seatMax: 10, rowLabelOffset: 0, puerta: ''
             });
-            AppState.expandedSectors.add(targetSectorId); 
-            toggleSelection(newId, false); 
-            renderMap(); 
+            AppState.expandedSectors.add(targetSectorId);
+            toggleSelection(newId, false);
+            renderMap();
+            updateUI();
+        }
+
+        function createNewArcArea() {
+            saveStateToHistory();
+            const targetSectorId = AppState.selectedSectorId || AppState.sectors[0]?.id || 'default-sec';
+            if (AppState.sectors.length === 0) {
+                AppState.sectors.push({ id: 'default-sec', title: 'Sector General' });
+            }
+            const newId = generateUniqueAreaId();
+            const viewport = document.getElementById('main-viewport');
+            const rect = viewport.getBoundingClientRect();
+            const cx = (rect.width/2 - AppState.panX) / AppState.zoom;
+            const cy = (rect.height/2 - AppState.panY) / AppState.zoom;
+            const shape = ArcMath.clampArcShape(ArcMath.defaultArcShape(cx, cy));
+            const area = {
+                id: newId,
+                title: `Tribuna Arco ${AppState.areaCounter}`,
+                code: `T${AppState.areaCounter}`,
+                sectorId: targetSectorId,
+                shape,
+                points: ArcMath.arcOutlinePoints(shape),
+                rowMin: 1, rowMax: 8, seatMin: 1, seatMax: 12,
+                rowLabelOffset: 0, puerta: ''
+            };
+            AppState.areas.push(area);
+            AppState.expandedSectors.add(targetSectorId);
+            toggleSelection(newId, false);
+            renderMap();
             updateUI();
         }
 
@@ -1893,15 +1927,17 @@
             
             updateActiveGroup();
 
-            AppState.interactionMode = 'move_area'; 
+            AppState.interactionMode = 'move_area';
             AppState.initialClickPoint = getMousePos(e);
             AppState.initialPointsMap = {};
+            AppState.initialArcShapesMap = {};
             AppState.initialGroupOriginalPoints = {};
-            
-            AppState.selectedAreaIds.forEach(id => { 
-                const a = AppState.areas.find(ar => ar.id === id); 
+
+            AppState.selectedAreaIds.forEach(id => {
+                const a = AppState.areas.find(ar => ar.id === id);
                 if(a) {
-                    AppState.initialPointsMap[id] = JSON.parse(JSON.stringify(a.points)); 
+                    AppState.initialPointsMap[id] = JSON.parse(JSON.stringify(a.points));
+                    if (isArc(a)) AppState.initialArcShapesMap[id] = JSON.parse(JSON.stringify(a.shape));
                     if (a.groupId && AppState.groups[a.groupId] && AppState.groups[a.groupId].originalPointsMap[id]) {
                         AppState.initialGroupOriginalPoints[id] = JSON.parse(JSON.stringify(AppState.groups[a.groupId].originalPointsMap[id]));
                     }
@@ -1964,8 +2000,29 @@
                 const a = AppState.areas.find(ar => ar.id === id);
                 if (a) AppState.initialPointsMap[id] = JSON.parse(JSON.stringify(a.points));
             });
-            const m = getMousePos(e); 
+            const m = getMousePos(e);
             AppState.initialAngle = Math.atan2(m.y - AppState.initialCenter.y, m.x - AppState.initialCenter.x);
+        }
+
+        function startMoveArcHandle(e, area, which) {
+            e.stopPropagation();
+            e.preventDefault();
+            saveStateToHistory();
+            AppState.interactionMode = 'move_arc_handle';
+            AppState.activeAreaId = area.id;
+            AppState.activeArcHandle = which; // 'startInner' | 'startOuter' | 'endInner' | 'endOuter'
+            AppState.initialClickPoint = getMousePos(e);
+            AppState.initialArcShape = JSON.parse(JSON.stringify(area.shape));
+        }
+
+        function startMoveArcCenter(e, area) {
+            e.stopPropagation();
+            e.preventDefault();
+            saveStateToHistory();
+            AppState.interactionMode = 'move_arc_center';
+            AppState.activeAreaId = area.id;
+            AppState.initialClickPoint = getMousePos(e);
+            AppState.initialArcShape = JSON.parse(JSON.stringify(area.shape));
         }
 
         function startMoveBackground(e) {
@@ -2021,12 +2078,41 @@
             if (!AppState.interactionMode) return;
             const m = getMousePos(e), dx = m.x - AppState.initialClickPoint.x, dy = m.y - AppState.initialClickPoint.y;
             
-            if (AppState.interactionMode === 'move_area') {
-                AppState.selectedAreaIds.forEach(id => { 
-                    const a = AppState.areas.find(ar => ar.id === id); 
-                    if(a && AppState.initialPointsMap[id]) {
-                        a.points = AppState.initialPointsMap[id].map(p => ({x: p.x+dx, y: p.y+dy})); 
-                    } 
+            if (AppState.interactionMode === 'move_arc_center') {
+                const area = AppState.areas.find(ar => ar.id === AppState.activeAreaId);
+                if (area && AppState.initialArcShape) {
+                    const init = AppState.initialArcShape;
+                    area.shape = ArcMath.clampArcShape({
+                        ...init,
+                        center: { x: init.center.x + dx, y: init.center.y + dy }
+                    });
+                    syncArcPoints(area);
+                }
+            } else if (AppState.interactionMode === 'move_arc_handle') {
+                const area = AppState.areas.find(ar => ar.id === AppState.activeAreaId);
+                if (area && AppState.initialArcShape) {
+                    const init = AppState.initialArcShape;
+                    const newAngle = ArcMath.angleFromPoint(init.center, m);
+                    const newRadius = ArcMath.radiusFromPoint(init.center, m);
+                    const which = AppState.activeArcHandle;
+                    const updated = { ...init, center: { ...init.center } };
+                    if (which === 'startInner' || which === 'startOuter') updated.startAngle = newAngle;
+                    if (which === 'endInner' || which === 'endOuter') updated.endAngle = newAngle;
+                    if (which === 'startInner' || which === 'endInner') updated.innerR = newRadius;
+                    if (which === 'startOuter' || which === 'endOuter') updated.outerR = newRadius;
+                    area.shape = ArcMath.clampArcShape(updated);
+                    syncArcPoints(area);
+                }
+            } else if (AppState.interactionMode === 'move_area') {
+                AppState.selectedAreaIds.forEach(id => {
+                    const a = AppState.areas.find(ar => ar.id === id);
+                    if (a && isArc(a) && AppState.initialArcShapesMap && AppState.initialArcShapesMap[id]) {
+                        const init = AppState.initialArcShapesMap[id];
+                        a.shape = { ...init, center: { x: init.center.x + dx, y: init.center.y + dy } };
+                        syncArcPoints(a);
+                    } else if (a && AppState.initialPointsMap[id]) {
+                        a.points = AppState.initialPointsMap[id].map(p => ({x: p.x+dx, y: p.y+dy}));
+                    }
                 });
                 
                 if (AppState.activeGroupId && AppState.initialGroupData) {
@@ -2881,7 +2967,7 @@
         }
         
         function populateAreaForm() {
-            const a = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]); 
+            const a = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
             if (!a) return;
             document.getElementById('prop-area-id').value = a.id;
             document.getElementById('prop-title').value = a.title;
@@ -2890,15 +2976,65 @@
             const bounds = getBounds(a.points);
             document.getElementById('prop-width').value = Math.round(bounds.width);
             document.getElementById('prop-height').value = Math.round(bounds.height);
-            const sel = document.getElementById('prop-sector-select'); 
+            const sel = document.getElementById('prop-sector-select');
             sel.innerHTML = '';
-            AppState.sectors.forEach(s => { 
-                const opt = document.createElement('option'); 
-                opt.value = s.id; 
-                opt.innerText = s.title; 
-                if (s.id === a.sectorId) opt.selected = true; 
-                sel.appendChild(opt); 
+            AppState.sectors.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.innerText = s.title;
+                if (s.id === a.sectorId) opt.selected = true;
+                sel.appendChild(opt);
             });
+
+            const arcBlock = document.getElementById('prop-arc-block');
+            const rectDims = document.getElementById('prop-rect-dims');
+            if (isArc(a)) {
+                arcBlock.classList.remove('hidden');
+                rectDims.classList.add('hidden');
+                document.getElementById('prop-arc-cx').value = Math.round(a.shape.center.x);
+                document.getElementById('prop-arc-cy').value = Math.round(a.shape.center.y);
+                document.getElementById('prop-arc-inner').value = Math.round(a.shape.innerR);
+                document.getElementById('prop-arc-outer').value = Math.round(a.shape.outerR);
+                document.getElementById('prop-arc-start').value = Math.round(ArcMath.radToDeg(a.shape.startAngle));
+                document.getElementById('prop-arc-end').value = Math.round(ArcMath.radToDeg(a.shape.endAngle));
+                document.getElementById('prop-arc-rows').value = (a.rowMax - a.rowMin + 1);
+                document.getElementById('prop-arc-seats').value = (a.seatMax - a.seatMin + 1);
+            } else {
+                arcBlock.classList.add('hidden');
+                rectDims.classList.remove('hidden');
+            }
+        }
+
+        function updateArcFromForm() {
+            const a = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
+            if (!a || !isArc(a)) return;
+            saveStateToHistory();
+            const num = (id, fallback) => {
+                const v = parseFloat(document.getElementById(id).value);
+                return Number.isFinite(v) ? v : fallback;
+            };
+            const proposed = {
+                type: 'arc',
+                center: { x: num('prop-arc-cx', a.shape.center.x), y: num('prop-arc-cy', a.shape.center.y) },
+                innerR: num('prop-arc-inner', a.shape.innerR),
+                outerR: num('prop-arc-outer', a.shape.outerR),
+                startAngle: ArcMath.degToRad(num('prop-arc-start', ArcMath.radToDeg(a.shape.startAngle))),
+                endAngle: ArcMath.degToRad(num('prop-arc-end', ArcMath.radToDeg(a.shape.endAngle)))
+            };
+            a.shape = ArcMath.clampArcShape(proposed);
+            syncArcPoints(a);
+            renderMap();
+        }
+
+        function updateArcRowsSeats() {
+            const a = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
+            if (!a || !isArc(a)) return;
+            saveStateToHistory();
+            const newRows = Math.max(1, parseInt(document.getElementById('prop-arc-rows').value) || 1);
+            const newSeats = Math.max(1, parseInt(document.getElementById('prop-arc-seats').value) || 1);
+            a.rowMin = 1; a.rowMax = newRows;
+            a.seatMin = 1; a.seatMax = newSeats;
+            renderMap();
         }
         
         function updateSelectedAreaFromForm() { 
