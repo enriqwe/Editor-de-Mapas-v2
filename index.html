@@ -967,6 +967,97 @@
             return id;
         }
 
+        // ---------- ARC SHAPE HELPERS (Fase 1) ----------
+        // Convención: ángulos en radianes, 0 = eje +X, positivo = sentido horario (SVG, Y invertido).
+        // Fila rowMin = arco interior (innerR), fila rowMax = arco exterior (outerR).
+        function isArc(area) { return !!(area && area.shape && area.shape.type === 'arc'); }
+
+        function arcOutlinePoints(shape, segments) {
+            segments = segments || 24;
+            const pts = [];
+            const { center, innerR, outerR, startAngle, endAngle } = shape;
+            for (let i = 0; i <= segments; i++) {
+                const t = i / segments;
+                const a = startAngle + t * (endAngle - startAngle);
+                pts.push({ x: center.x + outerR * Math.cos(a), y: center.y + outerR * Math.sin(a) });
+            }
+            for (let i = segments; i >= 0; i--) {
+                const t = i / segments;
+                const a = startAngle + t * (endAngle - startAngle);
+                pts.push({ x: center.x + innerR * Math.cos(a), y: center.y + innerR * Math.sin(a) });
+            }
+            return pts;
+        }
+
+        function arcPathD(shape) {
+            const { center, innerR, outerR, startAngle, endAngle } = shape;
+            const sweep = endAngle - startAngle;
+            const large = Math.abs(sweep) > Math.PI ? 1 : 0;
+            const sf = sweep > 0 ? 1 : 0;
+            const isf = sweep > 0 ? 0 : 1;
+            const p1 = { x: center.x + innerR * Math.cos(startAngle), y: center.y + innerR * Math.sin(startAngle) };
+            const p2 = { x: center.x + outerR * Math.cos(startAngle), y: center.y + outerR * Math.sin(startAngle) };
+            const p3 = { x: center.x + outerR * Math.cos(endAngle), y: center.y + outerR * Math.sin(endAngle) };
+            const p4 = { x: center.x + innerR * Math.cos(endAngle), y: center.y + innerR * Math.sin(endAngle) };
+            return `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y} A ${outerR} ${outerR} 0 ${large} ${sf} ${p3.x} ${p3.y} L ${p4.x} ${p4.y} A ${innerR} ${innerR} 0 ${large} ${isf} ${p1.x} ${p1.y} Z`;
+        }
+
+        function arcCentroid(shape) {
+            const a = (shape.startAngle + shape.endAngle) / 2;
+            const r = (shape.innerR + shape.outerR) / 2;
+            return { x: shape.center.x + r * Math.cos(a), y: shape.center.y + r * Math.sin(a) };
+        }
+
+        // Devuelve {x, y, angleDeg} para el asiento (rowPos, seatPos) dentro del arco.
+        function arcSeatPos(area, rowPos, seatPos) {
+            const sh = area.shape;
+            const rows = (area.rowMax - area.rowMin + 1) || 1;
+            const seats = (area.seatMax - area.seatMin + 1) || 1;
+            const rowT = (rowPos - area.rowMin + 0.5) / rows;
+            const seatT = (seatPos - area.seatMin + 0.5) / seats;
+            const r = sh.innerR + rowT * (sh.outerR - sh.innerR);
+            const a = sh.startAngle + seatT * (sh.endAngle - sh.startAngle);
+            return {
+                x: sh.center.x + r * Math.cos(a),
+                y: sh.center.y + r * Math.sin(a),
+                angleDeg: ((a + Math.PI / 2) * 180 / Math.PI)
+            };
+        }
+
+        // Refresca area.points (aproximación poligonal) tras cambiar el shape de arco.
+        function syncArcPoints(area) {
+            if (isArc(area)) area.points = arcOutlinePoints(area.shape);
+        }
+
+        // Helper de consola para Fase 1 (sin UI todavía).
+        // Uso:  __makeAreaArc('temp-area-3', { center:{x:600,y:400}, innerR:300, outerR:400, startAngleDeg:-20, endAngleDeg:20 })
+        // o    __makeAreaArc('Tribuna Norte', { center:{x:600,y:400}, innerR:300, outerR:400, startAngleDeg:-20, endAngleDeg:20 })
+        window.__makeAreaArc = function(idOrTitle, params) {
+            const area = AppState.areas.find(a => a.id === idOrTitle || a.title === idOrTitle || a.code === idOrTitle);
+            if (!area) { console.warn('Área no encontrada:', idOrTitle); return null; }
+            const startAngle = (params.startAngleDeg != null) ? params.startAngleDeg * Math.PI / 180 : params.startAngle;
+            const endAngle = (params.endAngleDeg != null) ? params.endAngleDeg * Math.PI / 180 : params.endAngle;
+            area.shape = {
+                type: 'arc',
+                center: { x: params.center.x, y: params.center.y },
+                innerR: params.innerR,
+                outerR: params.outerR,
+                startAngle, endAngle
+            };
+            syncArcPoints(area);
+            if (typeof renderMap === 'function') renderMap();
+            if (typeof updateUI === 'function') updateUI();
+            return area;
+        };
+
+        window.__makeAreaPolygon = function(idOrTitle) {
+            const area = AppState.areas.find(a => a.id === idOrTitle || a.title === idOrTitle || a.code === idOrTitle);
+            if (!area) return null;
+            delete area.shape;
+            if (typeof renderMap === 'function') renderMap();
+            return area;
+        };
+
         function getCentroid(points) {
             let x = 0, y = 0; points.forEach(p => { x += p.x; y += p.y; });
             return { x: x / points.length, y: y / points.length };
@@ -1148,13 +1239,29 @@
                 let area = AppState.areas.find(a => a.id === areaId);
                 if (!area) {
                     let restoredPoints = null;
-                    if (savedShape && savedShape.startsWith('[')) { try { restoredPoints = JSON.parse(savedShape); } catch(e) {} }
+                    let restoredShape = null;
+                    if (savedShape) {
+                        try {
+                            const parsed = JSON.parse(savedShape);
+                            if (Array.isArray(parsed)) {
+                                restoredPoints = parsed;
+                            } else if (parsed && parsed.type === 'polygon' && Array.isArray(parsed.points)) {
+                                restoredPoints = parsed.points;
+                            } else if (parsed && parsed.type === 'arc') {
+                                restoredShape = parsed;
+                            }
+                        } catch(e) {}
+                    }
                     area = {
                         id: areaId, title: areaTitle, code: areaCode, sectorId: secId,
                         rowMin: rowPos, rowMax: rowPos, seatMin: seatPos, seatMax: seatPos,
                         points: restoredPoints || [],
                         rowLabelOffset: 0, puerta: areaPuerta
                     };
+                    if (restoredShape) {
+                        area.shape = restoredShape;
+                        syncArcPoints(area);
+                    }
                     if (groupId) area.groupId = groupId;
                     AppState.areas.push(area);
                 } else {
@@ -1226,7 +1333,7 @@
                 const parentSector = AppState.sectors.find(s => s.id === area.sectorId);
                 areaSeats.forEach(seat => {
                     const posStr = `${Math.round(area.points[0].x)},${Math.round(area.points[0].y)}`;
-                    const shapeStr = JSON.stringify(area.points);
+                    const shapeStr = isArc(area) ? JSON.stringify(area.shape) : JSON.stringify(area.points);
                     const grpId = area.groupId || '';
                     const grpDataStr = grpId && AppState.groups[grpId] ? JSON.stringify(AppState.groups[grpId]) : '';
                     
@@ -1443,29 +1550,40 @@
                     const clipPath = document.createElementNS("http://www.w3.org/2000/svg", "clipPath");
                     clipPath.id = `clip-${area.id}`;
                     clipPath.classList.add("area-clip");
-                    const clipPoly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-                    clipPoly.setAttribute("points", area.points.map(p => `${p.x},${p.y}`).join(" "));
-                    clipPath.appendChild(clipPoly);
+                    if (isArc(area)) {
+                        const clipPathEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                        clipPathEl.setAttribute("d", arcPathD(area.shape));
+                        clipPath.appendChild(clipPathEl);
+                    } else {
+                        const clipPoly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+                        clipPoly.setAttribute("points", area.points.map(p => `${p.x},${p.y}`).join(" "));
+                        clipPath.appendChild(clipPoly);
+                    }
                     mapDefs.appendChild(clipPath);
                 }
 
                 const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
                 // Si el área está aislada o es individual, le ponemos los controles nativos completos (single-selected-group)
                 g.classList.toggle("single-selected-group", isActive && (!area.groupId || isIsolated));
-                
-                const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-                poly.setAttribute("points", area.points.map(p => `${p.x},${p.y}`).join(" "));
+
+                const shapeNodeName = isArc(area) ? "path" : "polygon";
+                const poly = document.createElementNS("http://www.w3.org/2000/svg", shapeNodeName);
+                if (isArc(area)) {
+                    poly.setAttribute("d", arcPathD(area.shape));
+                } else {
+                    poly.setAttribute("points", area.points.map(p => `${p.x},${p.y}`).join(" "));
+                }
                 poly.setAttribute("style", `fill: ${colors.fill}; stroke: ${colors.stroke};`);
                 poly.className.baseVal = `area-polygon ${isSelected ? (AppState.selectedAreaIds.length > 1 && !isIsolated ? "multi-selected" : "selected") : ""}`;
-                
+
                 poly.addEventListener('mousedown', (e) => {
                     if (AppState.curveAlignment && AppState.curveAlignment.active) return;
                     startMoveArea(e, area);
                 });
-                poly.addEventListener('dblclick', (e) => { 
+                poly.addEventListener('dblclick', (e) => {
                     if (AppState.curveAlignment && AppState.curveAlignment.active) return;
-                    e.stopPropagation(); 
-                    
+                    e.stopPropagation();
+
                     if (area.groupId && AppState.isolatedAreaId !== area.id) {
                         // Primer doble clic: Aislar el área del grupo
                         AppState.isolatedAreaId = area.id;
@@ -1480,7 +1598,7 @@
                         updateActiveGroup();
                         updateUI();
                         renderMap();
-                        openSeatEditor(); 
+                        openSeatEditor();
                     }
                 });
                 g.appendChild(poly);
@@ -1490,49 +1608,64 @@
                     gSeats.setAttribute("clip-path", `url(#clip-${area.id})`);
                     gSeats.setAttribute("pointer-events", "none");
 
-                    const p0 = area.points[0], p1 = area.points[1], p3 = area.points[3];
-                    const dx1 = p1.x - p0.x, dy1 = p1.y - p0.y, len1 = Math.sqrt(dx1*dx1+dy1*dy1);
-                    const dx3 = p3.x - p0.x, dy3 = p3.y - p0.y, len3 = Math.sqrt(dx3*dx3+dy3*dy3);
-                    const ux = dx1 / len1, uy = dy1 / len1, vx = dx3 / len3, vy = dy3 / len3; 
+                    if (isArc(area)) {
+                        const half = (GRID_STEP - 3) / 2;
+                        AppState.seats.filter(s => s.areaId === area.id).forEach(seat => {
+                            const pos = arcSeatPos(area, seat.rowPos, seat.seatPos);
+                            const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                            rect.setAttribute("x", pos.x - half); rect.setAttribute("y", pos.y - half);
+                            rect.setAttribute("width", GRID_STEP - 3); rect.setAttribute("height", GRID_STEP - 3);
+                            rect.setAttribute("rx", 1); rect.className.baseVal = "seat-mini";
+                            rect.setAttribute("transform", `rotate(${pos.angleDeg}, ${pos.x}, ${pos.y})`);
+                            gSeats.appendChild(rect);
+                        });
+                    } else {
+                        const p0 = area.points[0], p1 = area.points[1], p3 = area.points[3];
+                        const dx1 = p1.x - p0.x, dy1 = p1.y - p0.y, len1 = Math.sqrt(dx1*dx1+dy1*dy1);
+                        const dx3 = p3.x - p0.x, dy3 = p3.y - p0.y, len3 = Math.sqrt(dx3*dx3+dy3*dy3);
+                        const ux = dx1 / len1, uy = dy1 / len1, vx = dx3 / len3, vy = dy3 / len3;
 
-                    AppState.seats.filter(s => s.areaId === area.id).forEach(seat => {
-                        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-                        const worldX = p0.x + ((seat.seatPos - area.seatMin) * GRID_STEP + 2) * ux + ((area.rowMax - seat.rowPos) * GRID_STEP + 2) * vx;
-                        const worldY = p0.y + ((seat.seatPos - area.seatMin) * GRID_STEP + 2) * uy + ((area.rowMax - seat.rowPos) * GRID_STEP + 2) * vy;
-                        rect.setAttribute("x", worldX); rect.setAttribute("y", worldY);
-                        rect.setAttribute("width", GRID_STEP - 3); rect.setAttribute("height", GRID_STEP - 3);
-                        rect.setAttribute("rx", 1); rect.className.baseVal = "seat-mini";
-                        rect.setAttribute("transform", `rotate(${Math.atan2(uy, ux) * (180/Math.PI)}, ${worldX}, ${worldY})`);
-                        gSeats.appendChild(rect);
-                    });
+                        AppState.seats.filter(s => s.areaId === area.id).forEach(seat => {
+                            const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                            const worldX = p0.x + ((seat.seatPos - area.seatMin) * GRID_STEP + 2) * ux + ((area.rowMax - seat.rowPos) * GRID_STEP + 2) * vx;
+                            const worldY = p0.y + ((seat.seatPos - area.seatMin) * GRID_STEP + 2) * uy + ((area.rowMax - seat.rowPos) * GRID_STEP + 2) * vy;
+                            rect.setAttribute("x", worldX); rect.setAttribute("y", worldY);
+                            rect.setAttribute("width", GRID_STEP - 3); rect.setAttribute("height", GRID_STEP - 3);
+                            rect.setAttribute("rx", 1); rect.className.baseVal = "seat-mini";
+                            rect.setAttribute("transform", `rotate(${Math.atan2(uy, ux) * (180/Math.PI)}, ${worldX}, ${worldY})`);
+                            gSeats.appendChild(rect);
+                        });
+                    }
                     g.appendChild(gSeats);
                 }
 
-                const c = getCentroid(area.points);
+                const c = isArc(area) ? arcCentroid(area.shape) : getCentroid(area.points);
                 const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
-                txt.setAttribute("x", c.x); txt.setAttribute("y", c.y); 
+                txt.setAttribute("x", c.x); txt.setAttribute("y", c.y);
                 txt.setAttribute("text-anchor", "middle"); txt.setAttribute("dominant-baseline", "middle");
                 txt.className.baseVal = "area-label"; txt.textContent = area.code;
                 g.appendChild(txt);
 
-                const p3l = area.points[2], p4l = area.points[3];
-                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                line.setAttribute("class", "front-edge"); line.setAttribute("x1", p4l.x); line.setAttribute("y1", p4l.y); line.setAttribute("x2", p3l.x); line.setAttribute("y2", p3l.y);
-                g.appendChild(line);
+                if (!isArc(area)) {
+                    const p3l = area.points[2], p4l = area.points[3];
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    line.setAttribute("class", "front-edge"); line.setAttribute("x1", p4l.x); line.setAttribute("y1", p4l.y); line.setAttribute("x2", p3l.x); line.setAttribute("y2", p3l.y);
+                    g.appendChild(line);
 
-                const mx = (p3l.x+p4l.x)/2, my = (p3l.y+p4l.y)/2, dx = p3l.x-p4l.x, dy = p3l.y-p4l.y, l = Math.sqrt(dx*dx+dy*dy);
-                const nx = -dy/l, ny = dx/l;
-                const arrow = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                arrow.setAttribute("class", "front-arrow");
-                arrow.setAttribute("x1", mx); arrow.setAttribute("y1", my); 
-                arrow.setAttribute("x2", mx+nx*18); arrow.setAttribute("y2", my+ny*18); 
-                arrow.setAttribute("stroke", "#ef4444"); 
-                arrow.setAttribute("stroke-width", "3"); 
-                arrow.setAttribute("marker-end", "url(#arrowhead)"); 
-                g.appendChild(arrow);
+                    const mx = (p3l.x+p4l.x)/2, my = (p3l.y+p4l.y)/2, dx = p3l.x-p4l.x, dy = p3l.y-p4l.y, l = Math.sqrt(dx*dx+dy*dy);
+                    const nx = -dy/l, ny = dx/l;
+                    const arrow = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    arrow.setAttribute("class", "front-arrow");
+                    arrow.setAttribute("x1", mx); arrow.setAttribute("y1", my);
+                    arrow.setAttribute("x2", mx+nx*18); arrow.setAttribute("y2", my+ny*18);
+                    arrow.setAttribute("stroke", "#ef4444");
+                    arrow.setAttribute("stroke-width", "3");
+                    arrow.setAttribute("marker-end", "url(#arrowhead)");
+                    g.appendChild(arrow);
+                }
 
-                // Tiradores individuales si no está en modo curva global Y (no está agrupada O está aislada explícitamente)
-                if (isActive && (!AppState.curveAlignment || !AppState.curveAlignment.active) && (!AppState.activeGroupId || isIsolated)) {
+                // Tiradores individuales (solo para áreas polígono — los arcos tendrán handles propios en Fase 2)
+                if (!isArc(area) && isActive && (!AppState.curveAlignment || !AppState.curveAlignment.active) && (!AppState.activeGroupId || isIsolated)) {
                     area.points.forEach((p, i) => {
                         const ch = document.createElementNS("http://www.w3.org/2000/svg", "circle");
                         ch.setAttribute("cx", p.x); ch.setAttribute("cy", p.y); ch.setAttribute("r", 5);
