@@ -235,6 +235,63 @@ test('buildRingSegments: tribuna parcial (90° en 3 segs) cubre exactamente 90°
     assert.ok(approx(shapes[shapes.length - 1].endAngle, ArcMath.degToRad(45), 1e-9));
 });
 
+// -------- computeFrontDirection / averageFrontDirection --------
+test('computeFrontDirection: rectángulo estándar → (0,1) hacia abajo', () => {
+    const area = rectAreaForTest(0, 0, 100, 50, 5, 10);
+    const d = ArcMath.computeFrontDirection(area);
+    assert.ok(approx(d.x, 0, 1e-9));
+    assert.ok(approx(d.y, 1, 1e-9));
+});
+
+test('computeFrontDirection: rectángulo rotado 90° CW → (1,0) hacia la derecha', () => {
+    // Rotación 90° CW alrededor del origen: (x,y) → (-y, x)?
+    // Mejor: simulamos directamente los puntos rotados.
+    // Original points (CW): (-50,-25),(50,-25),(50,25),(-50,25)
+    // Rotar 90° CW (en SVG = (x,y)→(-y,x))... veamos:
+    // Implementación simple: rota cada punto 90° CW
+    function rotCW(p) { return { x: -p.y, y: p.x }; }
+    const base = rectAreaForTest(0, 0, 100, 50, 5, 10);
+    const area = { ...base, points: base.points.map(rotCW) };
+    const d = ArcMath.computeFrontDirection(area);
+    // Después de rotar 90° CW, el frente (que era abajo) ahora está a la izquierda.
+    // p2 era (50, 25) → (-25, 50). p3 era (-50, 25) → (-25, -50).
+    // dx = p2.x - p3.x = 0, dy = p2.y - p3.y = 100.
+    // nx = -dy/l = -1, ny = dx/l = 0. Dirección (-1, 0) = izquierda.
+    assert.ok(approx(d.x, -1, 1e-9));
+    assert.ok(approx(d.y, 0, 1e-9));
+});
+
+test('computeFrontDirection: arco apunta del innerMid al centro', () => {
+    const area = {
+        shape: { type: 'arc', center: { x: 0, y: 0 }, innerR: 100, outerR: 150, startAngle: 0, endAngle: Math.PI / 2 }
+    };
+    const d = ArcMath.computeFrontDirection(area);
+    // midAngle = π/4, innerMid = (100 cos π/4, 100 sin π/4) ≈ (70.7, 70.7).
+    // Dirección del innerMid al centro (0,0): (-70.7, -70.7) normalizado = (-0.707, -0.707).
+    assert.ok(approx(d.x, -Math.cos(Math.PI / 4), 1e-6));
+    assert.ok(approx(d.y, -Math.sin(Math.PI / 4), 1e-6));
+});
+
+test('averageFrontDirection: tres áreas todas abajo → (0,1)', () => {
+    const areas = [
+        rectAreaForTest(0, 0, 100, 50, 5, 10),
+        rectAreaForTest(150, 0, 100, 50, 5, 10),
+        rectAreaForTest(300, 0, 100, 50, 5, 10)
+    ];
+    const d = ArcMath.averageFrontDirection(areas);
+    assert.ok(approx(d.x, 0));
+    assert.ok(approx(d.y, 1));
+});
+
+test('averageFrontDirection: direcciones opuestas se cancelan → null', () => {
+    // Truco: simulamos un área "boca abajo" reordenando los points para que p2/p3 estén arriba.
+    const a1 = rectAreaForTest(0, 0, 100, 50, 5, 10);
+    // Reordenar puntos para invertir el frente:
+    const a2 = { ...a1, points: [a1.points[2], a1.points[3], a1.points[0], a1.points[1]] };
+    const d = ArcMath.averageFrontDirection([a1, a2]);
+    assert.equal(d, null);
+});
+
 // -------- fitGroupAsArc / layAreasFlat / computeAreaNaturalSize --------
 test('computeAreaNaturalSize: polígono devuelve dimensiones del bbox', () => {
     const area = rectAreaForTest(0, 0, 100, 50, 5, 10);

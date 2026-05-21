@@ -379,6 +379,45 @@
      *  - si es polígono → ancho/alto del bounding box
      *  - si es arco → arc length en midRadius × thickness radial
      */
+    /**
+     * Devuelve el vector unitario que indica hacia dónde apunta el frente del
+     * área (rowMin / fila más baja, hacia donde está el campo).
+     *  - polígono: perpendicular al lado p2-p3 (mismo cálculo que el render
+     *    de la flecha roja en index.html).
+     *  - arco: del punto medio del arco interior hacia el centro del arco.
+     */
+    function computeFrontDirection(area) {
+        if (area && area.shape && area.shape.type === 'arc') {
+            const sh = area.shape;
+            const midAngle = (sh.startAngle + sh.endAngle) / 2;
+            const innerMidX = sh.center.x + sh.innerR * Math.cos(midAngle);
+            const innerMidY = sh.center.y + sh.innerR * Math.sin(midAngle);
+            const dx = sh.center.x - innerMidX;
+            const dy = sh.center.y - innerMidY;
+            const l = Math.hypot(dx, dy) || 1;
+            return { x: dx / l, y: dy / l };
+        }
+        const pts = area && area.points;
+        if (!pts || pts.length < 4) return { x: 0, y: 1 };
+        const p2 = pts[2], p3 = pts[3];
+        const dx = p2.x - p3.x, dy = p2.y - p3.y;
+        const l = Math.hypot(dx, dy) || 1;
+        return { x: -dy / l, y: dx / l };
+    }
+
+    /** Promedia los vectores unitarios de varias áreas; null si suma ~0. */
+    function averageFrontDirection(areas) {
+        if (!Array.isArray(areas) || areas.length === 0) return null;
+        let sx = 0, sy = 0;
+        areas.forEach(a => {
+            const d = computeFrontDirection(a);
+            sx += d.x; sy += d.y;
+        });
+        const l = Math.hypot(sx, sy);
+        if (l < 1e-6) return null;
+        return { x: sx / l, y: sy / l };
+    }
+
     function computeAreaNaturalSize(area) {
         if (area && area.shape && area.shape.type === 'arc') {
             const sh = area.shape;
@@ -564,6 +603,7 @@
         buildRingSegments, fitAreasToArc, autoFitArcParams,
         curvaturePctToMidRadius, midRadiusToCurvaturePct,
         computeAreaNaturalSize, fitGroupAsArc, layAreasFlat,
+        computeFrontDirection, averageFrontDirection,
         defaultArcShape, clampArcShape,
         angleFromPoint, radiusFromPoint,
         parseAreaShape, serializeAreaShape

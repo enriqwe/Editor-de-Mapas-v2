@@ -2058,8 +2058,12 @@
                 minY = Math.min(minY, b.minY); maxY = Math.max(maxY, b.maxY);
             });
             const selCenter = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+            // Dirección hacia la que apuntan las flechas rojas (frente) de las áreas seleccionadas.
+            // Se usa para colocar el centro del arco en la dirección correcta y para orientar la
+            // línea recta a 100%.
+            const frontDir = ArcMath.averageFrontDirection(sel) || { x: 0, y: 1 };
 
-            _fitArcCtx = { selected: sel, snapshot, totalArcLen: totalNaturalWidth, selCenter };
+            _fitArcCtx = { selected: sel, snapshot, totalArcLen: totalNaturalWidth, selCenter, frontDir };
 
             let initialPct, cx, cy;
             if (allArcSameGroup) {
@@ -2071,8 +2075,9 @@
                 cy = sh.center.y;
             } else {
                 initialPct = 100;
-                cx = selCenter.x;
-                cy = selCenter.y + 50000; // centro muy lejos = "recto"
+                // Centro lejano en la dirección del frente (hacia donde miran las áreas).
+                cx = selCenter.x + frontDir.x * 50000;
+                cy = selCenter.y + frontDir.y * 50000;
             }
 
             document.getElementById('fit-arc-count').innerText = sel.length;
@@ -2140,9 +2145,13 @@
 
             // pct = 100% → recta perfecta (polígonos rectangulares en fila).
             if (pct >= 99.5) {
+                // Dirección de la línea: perpendicular al frente, rotada 90° CW
+                // (si el frente apunta hacia abajo, la fila se extiende horizontalmente).
+                const fd = _fitArcCtx.frontDir || { x: 0, y: 1 };
+                const directionRad = Math.atan2(-fd.x, fd.y);
                 const layout = ArcMath.layAreasFlat(ordered, {
                     center: _fitArcCtx.selCenter,
-                    directionRad: 0,
+                    directionRad,
                     gapPx: 4
                 });
                 const byId = new Map(layout.map(r => [r.id, r.points]));
