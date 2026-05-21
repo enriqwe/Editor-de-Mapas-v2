@@ -235,6 +235,93 @@ test('buildRingSegments: tribuna parcial (90° en 3 segs) cubre exactamente 90°
     assert.ok(approx(shapes[shapes.length - 1].endAngle, ArcMath.degToRad(45), 1e-9));
 });
 
+// -------- fitGroupAsArc / layAreasFlat / computeAreaNaturalSize --------
+test('computeAreaNaturalSize: polígono devuelve dimensiones del bbox', () => {
+    const area = rectAreaForTest(0, 0, 100, 50, 5, 10);
+    const sz = ArcMath.computeAreaNaturalSize(area);
+    assert.ok(approx(sz.width, 100));
+    assert.ok(approx(sz.height, 50));
+});
+
+test('computeAreaNaturalSize: arco devuelve sweep × midR de ancho y thickness de alto', () => {
+    const area = {
+        shape: { type: 'arc', center: { x: 0, y: 0 }, innerR: 100, outerR: 120, startAngle: 0, endAngle: Math.PI / 4 }
+    };
+    const sz = ArcMath.computeAreaNaturalSize(area);
+    const midR = 110;
+    assert.ok(approx(sz.width, (Math.PI / 4) * midR));
+    assert.ok(approx(sz.height, 20));
+});
+
+test('fitGroupAsArc: introduce gap angular entre áreas adyacentes', () => {
+    const areas = [
+        rectAreaForTest(0, 0, 100, 50, 5, 20),
+        rectAreaForTest(120, 0, 100, 50, 5, 20),
+        rectAreaForTest(240, 0, 100, 50, 5, 20)
+    ];
+    const result = ArcMath.fitGroupAsArc(areas, {
+        center: { x: 120, y: 1000 }, midRadius: 1000, gapDeg: 2, orientationRad: -Math.PI/2
+    });
+    for (let i = 1; i < result.length; i++) {
+        const gap = result[i].shape.startAngle - result[i-1].shape.endAngle;
+        assert.ok(approx(gap, ArcMath.degToRad(2), 1e-9));
+    }
+});
+
+test('fitGroupAsArc: sweep_i × midR == naturalWidth_i (ancho preservado)', () => {
+    const areas = [
+        rectAreaForTest(0, 0, 80, 50, 5, 16),    // ancho 80
+        rectAreaForTest(0, 0, 120, 50, 5, 24),   // ancho 120
+        rectAreaForTest(0, 0, 200, 50, 5, 40)    // ancho 200
+    ];
+    const result = ArcMath.fitGroupAsArc(areas, {
+        center: { x: 0, y: 1000 }, midRadius: 1000, gapDeg: 0, orientationRad: -Math.PI/2
+    });
+    const midR = (result[0].shape.innerR + result[0].shape.outerR) / 2;
+    [80, 120, 200].forEach((expected, i) => {
+        const sweep = result[i].shape.endAngle - result[i].shape.startAngle;
+        assert.ok(approx(sweep * midR, expected, 1));
+    });
+});
+
+test('fitGroupAsArc: thickness preserva alto de fila', () => {
+    const areas = [rectAreaForTest(0, 0, 100, 170, 17, 28)];
+    const result = ArcMath.fitGroupAsArc(areas, {
+        center: { x: 0, y: 1000 }, midRadius: 1000, gapDeg: 0
+    });
+    const thick = result[0].shape.outerR - result[0].shape.innerR;
+    assert.ok(approx(thick, 170, 1));
+});
+
+test('layAreasFlat: dispone áreas en fila con gap pixelado', () => {
+    const areas = [
+        rectAreaForTest(0, 0, 100, 50, 5, 20),
+        rectAreaForTest(0, 0, 100, 50, 5, 20)
+    ];
+    const result = ArcMath.layAreasFlat(areas, {
+        center: { x: 0, y: 0 }, directionRad: 0, gapPx: 10
+    });
+    assert.equal(result.length, 2);
+    // El primer área va de x=-(100+10+100)/2=-105 a -5; el segundo de 5 a 105
+    const p1Right = result[0].points[1].x;
+    const p2Left = result[1].points[0].x;
+    assert.ok(approx(p2Left - p1Right, 10));
+});
+
+test('layAreasFlat: ancho natural preservado por área', () => {
+    const areas = [
+        rectAreaForTest(0, 0, 80, 50, 5, 16),
+        rectAreaForTest(0, 0, 200, 50, 5, 40)
+    ];
+    const result = ArcMath.layAreasFlat(areas, {
+        center: { x: 0, y: 0 }, directionRad: 0, gapPx: 0
+    });
+    const w0 = result[0].points[1].x - result[0].points[0].x;
+    const w1 = result[1].points[1].x - result[1].points[0].x;
+    assert.ok(approx(w0, 80));
+    assert.ok(approx(w1, 200));
+});
+
 // -------- fitAreasToArc --------
 test('fitAreasToArc: bordes contiguos sin huecos (endAngle[i] = startAngle[i+1])', () => {
     const areas = [

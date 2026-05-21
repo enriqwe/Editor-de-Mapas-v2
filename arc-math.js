@@ -362,6 +362,114 @@
         };
     }
 
+    function bbox(pts) {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const p of pts) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+        }
+        return { minX, maxX, minY, maxY, w: maxX - minX, h: maxY - minY,
+            cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+    }
+
+    /**
+     * Calcula las dimensiones "naturales" (rectangulares) de un área:
+     *  - si es polígono → ancho/alto del bounding box
+     *  - si es arco → arc length en midRadius × thickness radial
+     */
+    function computeAreaNaturalSize(area) {
+        if (area && area.shape && area.shape.type === 'arc') {
+            const sh = area.shape;
+            const midR = (sh.innerR + sh.outerR) / 2;
+            const sweep = Math.abs(sh.endAngle - sh.startAngle);
+            return { width: sweep * midR, height: sh.outerR - sh.innerR };
+        }
+        const b = bbox(area.points || []);
+        return { width: b.w, height: b.h };
+    }
+
+    function median(arr) {
+        if (arr.length === 0) return 0;
+        const s = [...arr].sort((a, b) => a - b);
+        return s[Math.floor(s.length / 2)];
+    }
+
+    /**
+     * Genera shapes de arco para N áreas preservando su ANCHO NATURAL.
+     * Cada área obtiene un sweep = naturalWidth_i / midRadius, y se intercala
+     * un gap angular fijo entre adyacentes para que no se solapen.
+     * Todos comparten center/innerR/outerR → acople perfecto.
+     */
+    function fitGroupAsArc(areas, opts) {
+        const { center, midRadius, gapDeg = 1, orientationRad = -Math.PI / 2 } = opts;
+        if (!Array.isArray(areas) || areas.length === 0) throw new Error('fitGroupAsArc: areas vacío');
+        if (!(midRadius > 0)) throw new Error('fitGroupAsArc: midRadius > 0');
+        const gap = degToRad(gapDeg);
+        const stats = areas.map(a => {
+            const sz = computeAreaNaturalSize(a);
+            const nRows = (a.rowMax - a.rowMin + 1) || 1;
+            return { naturalWidth: sz.width, rowSpacing: sz.height / nRows, nRows };
+        });
+        const rowSpacing = median(stats.map(s => s.rowSpacing));
+        const maxRows = Math.max(...stats.map(s => s.nRows));
+        const thickness = maxRows * rowSpacing;
+        const innerR = Math.max(1, midRadius - thickness / 2);
+        const outerR = innerR + thickness;
+        const totalNaturalWidth = stats.reduce((s, x) => s + x.naturalWidth, 0);
+        const totalSweep = totalNaturalWidth / midRadius + (areas.length - 1) * gap;
+        const startAngle = orientationRad - totalSweep / 2;
+        let cursor = startAngle;
+        return areas.map((a, i) => {
+            const sweep = stats[i].naturalWidth / midRadius;
+            const shape = {
+                type: 'arc',
+                center: { x: center.x, y: center.y },
+                innerR, outerR,
+                startAngle: cursor,
+                endAngle: cursor + sweep
+            };
+            cursor += sweep + gap;
+            return { id: a.id, shape };
+        });
+    }
+
+    /**
+     * Coloca N áreas en línea recta, preservando ancho natural por área.
+     * Devuelve polígonos rectangulares con un gap pixelado entre vecinos.
+     * Usado cuando la curvatura es 100% (recta perfecta).
+     */
+    function layAreasFlat(areas, opts) {
+        const { center, directionRad = 0, gapPx = 4 } = opts;
+        if (!Array.isArray(areas) || areas.length === 0) throw new Error('layAreasFlat: areas vacío');
+        const stats = areas.map(a => {
+            const sz = computeAreaNaturalSize(a);
+            const nRows = (a.rowMax - a.rowMin + 1) || 1;
+            return { naturalWidth: sz.width, rowSpacing: sz.height / nRows, nRows };
+        });
+        const rowSpacing = median(stats.map(s => s.rowSpacing));
+        const maxRows = Math.max(...stats.map(s => s.nRows));
+        const H = maxRows * rowSpacing;
+        const totalW = stats.reduce((s, x) => s + x.naturalWidth, 0) + (areas.length - 1) * gapPx;
+        const dirX = Math.cos(directionRad), dirY = Math.sin(directionRad);
+        const perpX = -dirY, perpY = dirX; // perpendicular "hacia atrás" (rowMax)
+        const halfH = H / 2;
+        let cursor = -totalW / 2;
+        return areas.map((a, i) => {
+            const w = stats[i].naturalWidth;
+            const su = cursor, eu = cursor + w;
+            // Convención polygon: p0 top-left, p1 top-right, p2 bottom-right, p3 bottom-left.
+            // "top" = rowMax (lejos del campo), "bottom" = rowMin (cerca del campo).
+            const p0 = { x: center.x + dirX * su - perpX * halfH, y: center.y + dirY * su - perpY * halfH };
+            const p1 = { x: center.x + dirX * eu - perpX * halfH, y: center.y + dirY * eu - perpY * halfH };
+            const p2 = { x: center.x + dirX * eu + perpX * halfH, y: center.y + dirY * eu + perpY * halfH };
+            const p3 = { x: center.x + dirX * su + perpX * halfH, y: center.y + dirY * su + perpY * halfH };
+            cursor += w + gapPx;
+            return { id: a.id, points: [p0, p1, p2, p3] };
+        });
+    }
+
     /**
      * Acopla N áreas en un arco compartiendo `center`, `innerR`, `outerR`.
      * Cada área recibe una rebanada angular contigua a la anterior (sin huecos)
@@ -455,6 +563,7 @@
         arcsAreCompatible, findSnapAngle, findSnapRadius,
         buildRingSegments, fitAreasToArc, autoFitArcParams,
         curvaturePctToMidRadius, midRadiusToCurvaturePct,
+        computeAreaNaturalSize, fitGroupAsArc, layAreasFlat,
         defaultArcShape, clampArcShape,
         angleFromPoint, radiusFromPoint,
         parseAreaShape, serializeAreaShape

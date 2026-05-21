@@ -238,6 +238,10 @@
                     <button onclick="openFitToArcPanel()" class="mt-3 w-full bg-pink-600 text-white py-1.5 rounded text-xs font-bold hover:bg-pink-700 shadow-sm flex items-center justify-center gap-1">
                         <i data-lucide="git-commit" class="w-3.5 h-3.5"></i> Acoplar a arco
                     </button>
+                    <button id="btn-enter-individual" onclick="enterIndividualEditMode()" class="hidden mt-2 w-full bg-white border border-blue-300 text-blue-700 py-1.5 rounded text-xs font-bold hover:bg-blue-100 flex items-center justify-center gap-1">
+                        <i data-lucide="mouse-pointer-2" class="w-3.5 h-3.5"></i> Editar área individual
+                    </button>
+                    <div class="text-[10px] text-gray-500 mt-2">Doble clic en un área para aislarla del grupo.</div>
                 </div>
                 
                 <!-- Formulario de Grupo Curvo -->
@@ -376,6 +380,10 @@
                         <select id="prop-sector-select" class="w-full mt-1 border-gray-300 rounded-md shadow-sm border p-1" onchange="updateSelectedAreaSector()"></select>
                     </div>
                     <button type="button" onclick="openSeatEditor()" class="w-full mt-2 bg-blue-600 text-white py-2 rounded font-medium hover:bg-blue-700 shadow-sm flex justify-center items-center gap-2"><i data-lucide="grid-3x3" class="w-4 h-4"></i> Editar Asientos</button>
+                    <div id="prop-in-group" class="hidden mt-2 p-2 bg-purple-50 border border-purple-200 rounded text-[11px] text-purple-800 flex items-center justify-between gap-2">
+                        <span class="flex items-center gap-1"><i data-lucide="link" class="w-3 h-3"></i> Forma parte de un grupo</span>
+                        <button type="button" onclick="detachAreaFromGroup()" class="bg-white border border-purple-300 text-purple-700 px-2 py-0.5 rounded hover:bg-purple-100">Separar</button>
+                    </div>
                     <div class="pt-2 border-t mt-2 flex justify-between items-center"><button type="button" onclick="deleteSelectedArea()" class="text-red-600 hover:text-red-800 text-xs flex items-center gap-1"><i data-lucide="trash-2" class="w-3 h-3"></i> Eliminar Área</button></div>
                 </form>
             </div>
@@ -922,6 +930,27 @@
                     }
                 }
             }
+        }
+
+        function enterIndividualEditMode() {
+            if (AppState.selectedAreaIds.length < 1) return;
+            const firstId = AppState.selectedAreaIds[0];
+            AppState.isolatedAreaId = firstId;
+            AppState.selectedAreaIds = [firstId];
+            updateActiveGroup();
+            renderMap();
+            updateUI();
+        }
+
+        function detachAreaFromGroup() {
+            const a = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
+            if (!a || !a.groupId) return;
+            saveStateToHistory();
+            delete a.groupId;
+            AppState.isolatedAreaId = null;
+            updateActiveGroup();
+            renderMap();
+            updateUI();
         }
 
         function ungroupSelected() {
@@ -2011,33 +2040,46 @@
                 groupId: a.groupId
             }));
 
-            // Cálculos invariantes: ancho total de la selección + centroide (sirven como base
-            // para todas las operaciones del panel).
+            // Detectar si todas las áreas ya son arcos del mismo grupo (re-edición).
+            const allArcSameGroup = sel.every(a => isArc(a))
+                && sel.every(a => a.shape.center.x === sel[0].shape.center.x
+                                && a.shape.center.y === sel[0].shape.center.y
+                                && Math.abs(a.shape.innerR - sel[0].shape.innerR) < 1
+                                && Math.abs(a.shape.outerR - sel[0].shape.outerR) < 1);
+
+            // Centroide de la selección (basado en snapshot.points) y ancho natural total.
+            // Para arcos previos, el ancho natural es sweep × midR (preservado entre re-ediciones).
+            let totalNaturalWidth = 0;
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-            let totalWidth = 0;
             sel.forEach(a => {
+                totalNaturalWidth += ArcMath.computeAreaNaturalSize(a).width;
                 const b = getBounds(a.points);
                 minX = Math.min(minX, b.minX); maxX = Math.max(maxX, b.maxX);
                 minY = Math.min(minY, b.minY); maxY = Math.max(maxY, b.maxY);
-                totalWidth += b.width;
             });
             const selCenter = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
 
-            _fitArcCtx = { selected: sel, snapshot, totalArcLen: totalWidth, selCenter };
+            _fitArcCtx = { selected: sel, snapshot, totalArcLen: totalNaturalWidth, selCenter };
 
-            // Defaults: curvatura inicial al 100% (recta = sin cambio); el usuario decide la curva.
-            const initialPct = 100;
-            const direction = { x: 0, y: 1 }; // por defecto el centro queda debajo
-            const initialMidR = ArcMath.curvaturePctToMidRadius(initialPct, totalWidth);
-            const cx = selCenter.x + direction.x * Math.min(initialMidR, 50000);
-            const cy = selCenter.y + direction.y * Math.min(initialMidR, 50000);
+            let initialPct, cx, cy;
+            if (allArcSameGroup) {
+                // Re-edición: leer el estado actual.
+                const sh = sel[0].shape;
+                const midR = (sh.innerR + sh.outerR) / 2;
+                initialPct = Math.round(ArcMath.midRadiusToCurvaturePct(midR, totalNaturalWidth));
+                cx = sh.center.x;
+                cy = sh.center.y;
+            } else {
+                initialPct = 100;
+                cx = selCenter.x;
+                cy = selCenter.y + 50000; // centro muy lejos = "recto"
+            }
 
             document.getElementById('fit-arc-count').innerText = sel.length;
             document.getElementById('fit-arc-curvature').value = initialPct;
             document.getElementById('fit-arc-curvature-val').innerText = initialPct;
             document.getElementById('fit-arc-cx').value = Math.round(cx);
             document.getElementById('fit-arc-cy').value = Math.round(cy);
-            // El bloque avanzado se rellena cuando hay curvatura < 100.
             document.getElementById('fit-arc-inner').value = '';
             document.getElementById('fit-arc-outer').value = '';
             document.getElementById('fit-arc-start').value = '';
@@ -2068,93 +2110,92 @@
 
         function onFitArcInput() {
             if (!_fitArcCtx) return;
-            const curvEl = document.getElementById('fit-arc-curvature');
-            const pct = parseFloat(curvEl.value);
+            const pct = parseFloat(document.getElementById('fit-arc-curvature').value);
             document.getElementById('fit-arc-curvature-val').innerText = Math.round(pct);
-
-            const advFields = ['fit-arc-cx','fit-arc-cy','fit-arc-inner','fit-arc-outer','fit-arc-start','fit-arc-end'];
-            const userEditingAdv = advFields.includes(document.activeElement?.id);
-
-            if (!userEditingAdv) {
-                // Slider o distribución: recomputamos centro a la distancia que dicta pct,
-                // manteniendo la dirección actual (o por defecto, abajo).
-                const midR = ArcMath.curvaturePctToMidRadius(pct, _fitArcCtx.totalArcLen);
-                const selC = _fitArcCtx.selCenter;
-                const cxCur = parseFloat(document.getElementById('fit-arc-cx').value);
-                const cyCur = parseFloat(document.getElementById('fit-arc-cy').value);
-                let dx = cxCur - selC.x, dy = cyCur - selC.y;
-                const norm = Math.hypot(dx, dy);
-                if (!norm || !Number.isFinite(norm)) { dx = 0; dy = 1; }
-                else { dx /= norm; dy /= norm; }
-                const finiteR = Number.isFinite(midR) ? midR : 50000;
-                const newCx = selC.x + dx * finiteR;
-                const newCy = selC.y + dy * finiteR;
-                document.getElementById('fit-arc-cx').value = Math.round(newCx);
-                document.getElementById('fit-arc-cy').value = Math.round(newCy);
-
-                if (Number.isFinite(midR)) {
-                    const orig = _fitArcCtx.selected.map(a => {
-                        const snap = _fitArcCtx.snapshot.get(a.id);
-                        return { points: snap.points, rowMin: a.rowMin, rowMax: a.rowMax, seatMin: a.seatMin, seatMax: a.seatMax };
-                    });
-                    const auto = ArcMath.autoFitArcParams(orig, { center: { x: newCx, y: newCy }, midRadius: midR });
-                    document.getElementById('fit-arc-inner').value = Math.round(auto.innerR);
-                    document.getElementById('fit-arc-outer').value = Math.round(auto.outerR);
-                    document.getElementById('fit-arc-start').value = Math.round(auto.startAngleDeg);
-                    document.getElementById('fit-arc-end').value = Math.round(auto.endAngleDeg);
-                } else {
-                    document.getElementById('fit-arc-inner').value = '';
-                    document.getElementById('fit-arc-outer').value = '';
-                    document.getElementById('fit-arc-start').value = '';
-                    document.getElementById('fit-arc-end').value = '';
-                }
-            }
             applyFitArcPreview();
         }
 
         function applyFitArcPreview() {
             if (!_fitArcCtx) return;
             const pct = parseFloat(document.getElementById('fit-arc-curvature').value);
+            const sortByX = document.getElementById('fit-arc-sort').checked;
+            const sel = _fitArcCtx.selected;
+            // Trabajamos siempre con áreas tal y como estaban en el snapshot
+            // (rectángulos naturales o arco previo) para que la operación sea idempotente.
+            const baseAreas = sel.map(a => {
+                const snap = _fitArcCtx.snapshot.get(a.id);
+                return { id: a.id, points: snap.points, shape: snap.shape || undefined,
+                    rowMin: a.rowMin, rowMax: a.rowMax, seatMin: a.seatMin, seatMax: a.seatMax };
+            });
+            const ordered = sortByX
+                ? [...baseAreas].sort((a, b) => {
+                    const av = ArcMath.computeAreaNaturalSize(a);
+                    const bv = ArcMath.computeAreaNaturalSize(b);
+                    // Para ordenar por posición horizontal usamos la X actual real del centroide.
+                    const ap = sel.find(s => s.id === a.id);
+                    const bp = sel.find(s => s.id === b.id);
+                    return getCentroid(_fitArcCtx.snapshot.get(ap.id).points).x - getCentroid(_fitArcCtx.snapshot.get(bp.id).points).x;
+                })
+                : baseAreas;
 
-            // pct = 100% → línea recta: restaurar el snapshot (sin curvar).
+            // pct = 100% → recta perfecta (polígonos rectangulares en fila).
             if (pct >= 99.5) {
-                _fitArcCtx.selected.forEach(a => {
-                    const snap = _fitArcCtx.snapshot.get(a.id);
-                    if (snap.shape) a.shape = JSON.parse(JSON.stringify(snap.shape));
-                    else delete a.shape;
-                    a.points = JSON.parse(JSON.stringify(snap.points));
+                const layout = ArcMath.layAreasFlat(ordered, {
+                    center: _fitArcCtx.selCenter,
+                    directionRad: 0,
+                    gapPx: 4
+                });
+                const byId = new Map(layout.map(r => [r.id, r.points]));
+                sel.forEach(area => {
+                    const pts = byId.get(area.id);
+                    if (!pts) return;
+                    area.points = pts;
+                    delete area.shape;
                 });
                 renderMap();
                 return;
             }
 
-            const num = (id) => parseFloat(document.getElementById(id).value);
-            const params = {
-                center: { x: num('fit-arc-cx'), y: num('fit-arc-cy') },
-                innerR: num('fit-arc-inner'),
-                outerR: num('fit-arc-outer'),
-                startAngleDeg: num('fit-arc-start'),
-                endAngleDeg: num('fit-arc-end'),
-                distribution: document.getElementById('fit-arc-distribution').value
-            };
-            if (!(params.innerR > 0) || !(params.outerR > params.innerR)) return;
-            const sortByX = document.getElementById('fit-arc-sort').checked;
-            const sel = _fitArcCtx.selected;
-            const ordered = sortByX
-                ? [...sel].sort((a, b) => {
-                    const ap = _fitArcCtx.snapshot.get(a.id).points;
-                    const bp = _fitArcCtx.snapshot.get(b.id).points;
-                    return getCentroid(ap).x - getCentroid(bp).x;
-                })
-                : sel;
-            const result = ArcMath.fitAreasToArc(ordered, params);
+            // pct < 100 → arco. midRadius derivado del porcentaje sobre el ancho natural total.
+            const totalNaturalWidth = ordered.reduce((sum, a) => sum + ArcMath.computeAreaNaturalSize(a).width, 0);
+            const midRadius = ArcMath.curvaturePctToMidRadius(pct, totalNaturalWidth);
+            if (!Number.isFinite(midRadius)) return;
+
+            const cx = parseFloat(document.getElementById('fit-arc-cx').value);
+            const cy = parseFloat(document.getElementById('fit-arc-cy').value);
+            // Reposicionar el centro a la distancia midRadius preservando la dirección.
+            const selC = _fitArcCtx.selCenter;
+            let dxn = cx - selC.x, dyn = cy - selC.y;
+            const norm = Math.hypot(dxn, dyn) || 1;
+            dxn /= norm; dyn /= norm;
+            const adjCx = selC.x + dxn * midRadius;
+            const adjCy = selC.y + dyn * midRadius;
+            const orientationRad = Math.atan2(selC.y - adjCy, selC.x - adjCx);
+            // El gap angular se elige proporcional al midRadius para que sea visible
+            // pero pequeño (≈ 0.5° por defecto).
+            const gapDeg = 0.5;
+
+            const result = ArcMath.fitGroupAsArc(ordered, {
+                center: { x: adjCx, y: adjCy },
+                midRadius,
+                gapDeg,
+                orientationRad
+            });
             const byId = new Map(result.map(r => [r.id, r.shape]));
-            ordered.forEach(area => {
+            sel.forEach(area => {
                 const shape = byId.get(area.id);
                 if (!shape) return;
                 area.shape = ArcMath.clampArcShape(shape);
                 syncArcPoints(area);
             });
+            // Sincronizamos los campos avanzados.
+            const sh0 = result[0].shape;
+            document.getElementById('fit-arc-cx').value = Math.round(adjCx);
+            document.getElementById('fit-arc-cy').value = Math.round(adjCy);
+            document.getElementById('fit-arc-inner').value = Math.round(sh0.innerR);
+            document.getElementById('fit-arc-outer').value = Math.round(sh0.outerR);
+            document.getElementById('fit-arc-start').value = Math.round(ArcMath.radToDeg(result[0].shape.startAngle));
+            document.getElementById('fit-arc-end').value = Math.round(ArcMath.radToDeg(result[result.length-1].shape.endAngle));
             renderMap();
         }
 
@@ -2223,23 +2264,35 @@
             e.preventDefault();
             saveStateToHistory();
             
-            // Lógica de Selección de Grupos o Aislamiento
-            if (area.groupId && !e.ctrlKey && !e.shiftKey && AppState.isolatedAreaId !== area.id) {
+            // Lógica de Selección de Grupos o Aislamiento.
+            // - Ctrl/Shift+clic: extiende la selección como siempre.
+            // - Si NO hay nada aislado y el área pertenece a un grupo → selecciona todo el grupo.
+            // - Si ya hay un área aislada del MISMO grupo → aísla la nueva (permite saltar entre
+            //   áreas individuales del mismo arco).
+            // - Si hay aislamiento pero clicas un área de OTRO grupo (o sin grupo) → reset normal.
+            if (e.ctrlKey || e.shiftKey) {
+                if (!AppState.selectedAreaIds.includes(area.id)) AppState.selectedAreaIds.push(area.id);
+            } else if (area.groupId) {
                 const groupAreaIds = AppState.areas.filter(a => a.groupId === area.groupId).map(a => a.id);
-                // Seleccionar todo el grupo
-                if (!AppState.selectedAreaIds.includes(area.id) || AppState.selectedAreaIds.length !== groupAreaIds.length) {
+                const isolatedInSameGroup = AppState.isolatedAreaId &&
+                    AppState.areas.find(a => a.id === AppState.isolatedAreaId)?.groupId === area.groupId;
+                if (isolatedInSameGroup) {
+                    // Cambiar el aislamiento a esta otra área del mismo grupo.
+                    AppState.isolatedAreaId = area.id;
+                    AppState.selectedAreaIds = [area.id];
+                } else if (AppState.isolatedAreaId === area.id) {
+                    // Click sobre la propia área aislada: mantener selección.
+                    AppState.selectedAreaIds = [area.id];
+                } else {
+                    // Seleccionar todo el grupo.
                     AppState.selectedAreaIds = groupAreaIds;
-                    AppState.isolatedAreaId = null; 
+                    AppState.isolatedAreaId = null;
                 }
             } else {
                 if (!AppState.selectedAreaIds.includes(area.id)) {
-                    if (!e.shiftKey && !e.ctrlKey) {
-                        AppState.selectedAreaIds = [area.id];
-                        AppState.isolatedAreaId = null;
-                    } else {
-                        AppState.selectedAreaIds.push(area.id);
-                    }
+                    AppState.selectedAreaIds = [area.id];
                 }
+                AppState.isolatedAreaId = null;
             }
             
             updateActiveGroup();
@@ -2796,10 +2849,17 @@
                 document.getElementById('clipboard-tools').classList.remove('hidden');
                 btnCurveAlign.classList.add('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
             } else if (AppState.selectedAreaIds.length > 1) {
-                multi.classList.remove('hidden'); 
-                document.getElementById('multi-count').innerText = AppState.selectedAreaIds.length; 
+                multi.classList.remove('hidden');
+                document.getElementById('multi-count').innerText = AppState.selectedAreaIds.length;
                 document.getElementById('clipboard-tools').classList.remove('hidden');
                 btnCurveAlign.classList.remove('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
+                // Mostrar botón "Editar individual" si la selección es un grupo (todas comparten groupId).
+                const firstA = AppState.areas.find(a => a.id === AppState.selectedAreaIds[0]);
+                const isGroup = firstA?.groupId && AppState.selectedAreaIds.every(id => {
+                    const a = AppState.areas.find(x => x.id === id);
+                    return a && a.groupId === firstA.groupId;
+                });
+                document.getElementById('btn-enter-individual').classList.toggle('hidden', !isGroup);
             } else if (AppState.selectedSectorId) {
                 sectorForm.classList.remove('hidden'); 
                 populateSectorForm(); 
@@ -3339,6 +3399,8 @@
                 if (s.id === a.sectorId) opt.selected = true;
                 sel.appendChild(opt);
             });
+
+            document.getElementById('prop-in-group').classList.toggle('hidden', !a.groupId);
 
             const arcBlock = document.getElementById('prop-arc-block');
             const rectDims = document.getElementById('prop-rect-dims');
