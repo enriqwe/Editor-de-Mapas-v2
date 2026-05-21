@@ -310,6 +310,26 @@ test('computeAreaNaturalSize: arco devuelve sweep × midR de ancho y thickness d
     assert.ok(approx(sz.height, 20));
 });
 
+test('fitGroupAsArc: gapPx produce longitud de arco constante en píxeles a cualquier midRadius', () => {
+    const areas = [
+        rectAreaForTest(0, 0, 80, 50, 5, 16),
+        rectAreaForTest(120, 0, 80, 50, 5, 16),
+        rectAreaForTest(240, 0, 80, 50, 5, 16)
+    ];
+    // A radios muy distintos el gap pixelado debe seguir produciendo ~4 px de arco entre vecinos.
+    for (const midR of [200, 1000, 5000, 50000]) {
+        const result = ArcMath.fitGroupAsArc(areas, {
+            center: { x: 0, y: midR }, midRadius: midR, gapPx: 4, orientationRad: -Math.PI/2
+        });
+        for (let i = 1; i < result.length; i++) {
+            const gapAngular = result[i].shape.startAngle - result[i-1].shape.endAngle;
+            const gapArcLen = gapAngular * midR;
+            assert.ok(approx(gapArcLen, 4, 1e-6),
+                `midR=${midR} gap=${gapArcLen}px (esperado 4)`);
+        }
+    }
+});
+
 test('fitGroupAsArc: introduce gap angular entre áreas adyacentes', () => {
     const areas = [
         rectAreaForTest(0, 0, 100, 50, 5, 20),

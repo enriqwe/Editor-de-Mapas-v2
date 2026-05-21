@@ -2180,14 +2180,12 @@
             const adjCx = selC.x + dxn * midRadius;
             const adjCy = selC.y + dyn * midRadius;
             const orientationRad = Math.atan2(selC.y - adjCy, selC.x - adjCx);
-            // El gap angular se elige proporcional al midRadius para que sea visible
-            // pero pequeño (≈ 0.5° por defecto).
-            const gapDeg = 0.5;
-
+            // Gap en píxeles de arc-length (constante visualmente con la curvatura),
+            // mismo valor que el gap pixelado de la recta a 100% → transición suave.
             const result = ArcMath.fitGroupAsArc(ordered, {
                 center: { x: adjCx, y: adjCy },
                 midRadius,
-                gapDeg,
+                gapPx: 4,
                 orientationRad
             });
             const byId = new Map(result.map(r => [r.id, r.shape]));

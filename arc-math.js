@@ -437,15 +437,16 @@
 
     /**
      * Genera shapes de arco para N áreas preservando su ANCHO NATURAL.
-     * Cada área obtiene un sweep = naturalWidth_i / midRadius, y se intercala
-     * un gap angular fijo entre adyacentes para que no se solapen.
+     * Cada área obtiene un sweep = naturalWidth_i / midRadius. Entre adyacentes
+     * se intercala un gap fijo: `gapPx` (longitud de arco en píxeles, recomendado)
+     * o `gapDeg` (ángulo en grados). Si se especifican ambos, se suman.
      * Todos comparten center/innerR/outerR → acople perfecto.
      */
     function fitGroupAsArc(areas, opts) {
-        const { center, midRadius, gapDeg = 1, orientationRad = -Math.PI / 2 } = opts;
+        const { center, midRadius, gapDeg = 0, gapPx = 0, orientationRad = -Math.PI / 2 } = opts;
         if (!Array.isArray(areas) || areas.length === 0) throw new Error('fitGroupAsArc: areas vacío');
         if (!(midRadius > 0)) throw new Error('fitGroupAsArc: midRadius > 0');
-        const gap = degToRad(gapDeg);
+        const gap = degToRad(gapDeg) + (gapPx / midRadius);
         const stats = areas.map(a => {
             const sz = computeAreaNaturalSize(a);
             const nRows = (a.rowMax - a.rowMin + 1) || 1;
