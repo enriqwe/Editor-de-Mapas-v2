@@ -435,6 +435,83 @@
         return { x: sx / l, y: sy / l };
     }
 
+    /**
+     * Calcula la rejilla de asientos derivada del polígono actual.
+     *  - origin: p0 (esquina superior-izquierda lógica, donde está seatMin × rowMax)
+     *  - seatAxis: vector unitario p0→p1 (incremento de seatPos)
+     *  - rowAxis: vector unitario p0→p3 (decremento de rowPos)
+     *  - seatSpacing: paso en px por asiento (long. del lado p0p1 / nº de asientos)
+     *  - rowSpacing: paso en px por fila (long. del lado p0p3 / nº de filas)
+     *
+     * Una vez almacenada en area.seatGrid, los asientos quedan posicionados
+     * INDEPENDIENTEMENTE de los puntos del polígono: arrastrar una esquina
+     * deforma el outline pero deja los asientos donde estaban.
+     */
+    function computeSeatGridFromPolygon(area) {
+        const pts = area && area.points;
+        if (!pts || pts.length < 4) return null;
+        const p0 = pts[0], p1 = pts[1], p3 = pts[3];
+        const seatVec = { x: p1.x - p0.x, y: p1.y - p0.y };
+        const rowVec = { x: p3.x - p0.x, y: p3.y - p0.y };
+        const seatLen = Math.hypot(seatVec.x, seatVec.y) || 1;
+        const rowLen = Math.hypot(rowVec.x, rowVec.y) || 1;
+        const nSeats = (area.seatMax - area.seatMin + 1) || 1;
+        const nRows = (area.rowMax - area.rowMin + 1) || 1;
+        return {
+            origin: { x: p0.x, y: p0.y },
+            seatAxis: { x: seatVec.x / seatLen, y: seatVec.y / seatLen },
+            rowAxis: { x: rowVec.x / rowLen, y: rowVec.y / rowLen },
+            seatSpacing: seatLen / nSeats,
+            rowSpacing: rowLen / nRows
+        };
+    }
+
+    /**
+     * Devuelve la posición ABSOLUTA del rectángulo de un asiento dentro del área.
+     * Coordenadas del top-left del rect (compatibles con el render que dibuja
+     * rect.x=pos.x, rect.y=pos.y, ancho=GRID_STEP-3).
+     */
+    function seatPosFromGrid(area, rowPos, seatPos) {
+        const g = area && area.seatGrid;
+        if (!g) return null;
+        const offSeat = (seatPos - area.seatMin) * g.seatSpacing + 2;
+        const offRow = (area.rowMax - rowPos) * g.rowSpacing + 2;
+        return {
+            x: g.origin.x + offSeat * g.seatAxis.x + offRow * g.rowAxis.x,
+            y: g.origin.y + offSeat * g.seatAxis.y + offRow * g.rowAxis.y,
+            angleDeg: Math.atan2(g.seatAxis.y, g.seatAxis.x) * 180 / Math.PI
+        };
+    }
+
+    /** Aplica una traslación (dx, dy) a un seatGrid. Pura. */
+    function translateSeatGrid(grid, dx, dy) {
+        if (!grid) return grid;
+        return {
+            ...grid,
+            origin: { x: grid.origin.x + dx, y: grid.origin.y + dy }
+        };
+    }
+
+    /** Rota un seatGrid en `deltaRad` alrededor de (cx, cy). Pura. */
+    function rotateSeatGrid(grid, cx, cy, deltaRad) {
+        if (!grid) return grid;
+        const cos = Math.cos(deltaRad), sin = Math.sin(deltaRad);
+        const ox = grid.origin.x - cx, oy = grid.origin.y - cy;
+        return {
+            origin: { x: cx + ox * cos - oy * sin, y: cy + ox * sin + oy * cos },
+            seatAxis: {
+                x: grid.seatAxis.x * cos - grid.seatAxis.y * sin,
+                y: grid.seatAxis.x * sin + grid.seatAxis.y * cos
+            },
+            rowAxis: {
+                x: grid.rowAxis.x * cos - grid.rowAxis.y * sin,
+                y: grid.rowAxis.x * sin + grid.rowAxis.y * cos
+            },
+            seatSpacing: grid.seatSpacing,
+            rowSpacing: grid.rowSpacing
+        };
+    }
+
     function computeAreaNaturalSize(area) {
         if (area && area.shape && area.shape.type === 'arc') {
             const sh = area.shape;
@@ -625,7 +702,7 @@
         try { parsed = JSON.parse(raw); } catch (e) { return { kind: 'none' }; }
         if (Array.isArray(parsed)) return { kind: 'polygon', points: parsed };
         if (parsed && parsed.type === 'polygon' && Array.isArray(parsed.points)) {
-            return { kind: 'polygon', points: parsed.points };
+            return { kind: 'polygon', points: parsed.points, seatGrid: parsed.seatGrid || null };
         }
         if (parsed && parsed.type === 'arc' && isArcShape(parsed)) {
             return { kind: 'arc', shape: parsed };
@@ -635,11 +712,16 @@
 
     /**
      * Serializa el shape para `AREA SHAPE` en CSV.
-     * Polígonos se exportan como array (compat con v1); arcos como objeto tipado.
+     * Polígonos sin seatGrid se exportan como array (compat con v1).
+     * Polígonos con seatGrid → objeto {type:'polygon', points, seatGrid}.
+     * Arcos como objeto tipado.
      */
     function serializeAreaShape(area) {
         if (isArcArea(area)) return JSON.stringify(area.shape);
-        return JSON.stringify(area.points || []);
+        if (area && area.seatGrid && area.points) {
+            return JSON.stringify({ type: 'polygon', points: area.points, seatGrid: area.seatGrid });
+        }
+        return JSON.stringify(area && area.points ? area.points : []);
     }
 
     const api = {
@@ -651,6 +733,8 @@
         curvaturePctToMidRadius, midRadiusToCurvaturePct,
         computeAreaNaturalSize, fitGroupAsArc, layAreasFlat,
         computeFrontDirection, averageFrontDirection,
+        computeSeatGridFromPolygon, seatPosFromGrid,
+        translateSeatGrid, rotateSeatGrid,
         defaultArcShape, clampArcShape,
         angleFromPoint, radiusFromPoint,
         parseAreaShape, serializeAreaShape

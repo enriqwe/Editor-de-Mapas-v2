@@ -361,6 +361,7 @@
                         <select id="prop-sector-select" class="w-full mt-1 border-gray-300 rounded-md shadow-sm border p-1" onchange="updateSelectedAreaSector()"></select>
                     </div>
                     <button type="button" onclick="openSeatEditor()" class="w-full mt-2 bg-blue-600 text-white py-2 rounded font-medium hover:bg-blue-700 shadow-sm flex justify-center items-center gap-2"><i data-lucide="grid-3x3" class="w-4 h-4"></i> Editar Asientos</button>
+                    <button id="btn-rederive-grid" type="button" onclick="rederiveSeatGrid()" class="hidden w-full mt-1 text-xs text-purple-700 underline hover:text-purple-900" title="Recalcula la rejilla de asientos para que coincida con la forma actual del polígono">Reajustar grid al polígono</button>
                     <div id="prop-in-group" class="hidden mt-2 p-2 bg-purple-50 border border-purple-200 rounded text-[11px] text-purple-800 flex items-center justify-between gap-2">
                         <span class="flex items-center gap-1"><i data-lucide="link" class="w-3 h-3"></i> Forma parte de un grupo</span>
                         <button type="button" onclick="detachAreaFromGroup()" class="bg-white border border-purple-300 text-purple-700 px-2 py-0.5 rounded hover:bg-purple-100">Separar</button>
@@ -923,6 +924,14 @@
             updateUI();
         }
 
+        function rederiveSeatGrid() {
+            const a = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
+            if (!a || isArc(a)) return;
+            saveStateToHistory();
+            a.seatGrid = ArcMath.computeSeatGridFromPolygon(a);
+            renderMap();
+        }
+
         function detachAreaFromGroup() {
             const a = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
             if (!a || !a.groupId) return;
@@ -983,6 +992,11 @@
                 delete newArea.groupId;
 
                 newArea.points = newArea.points.map(p => ({ x: p.x + 20, y: p.y + 20 }));
+                // Trasladar también el seatGrid si existía (para que los asientos copien la
+                // misma rejilla absoluta desplazada +20/+20).
+                if (newArea.seatGrid) {
+                    newArea.seatGrid = ArcMath.translateSeatGrid(newArea.seatGrid, 20, 20);
+                }
 
                 AppState.areas.push(newArea);
                 newSelection.push(newAreaId);
@@ -1305,9 +1319,14 @@
                 if (!area) {
                     let restoredPoints = null;
                     let restoredShape = null;
+                    let restoredSeatGrid = null;
                     const parsedShape = ArcMath.parseAreaShape(savedShape);
-                    if (parsedShape.kind === 'polygon') restoredPoints = parsedShape.points;
-                    else if (parsedShape.kind === 'arc') restoredShape = parsedShape.shape;
+                    if (parsedShape.kind === 'polygon') {
+                        restoredPoints = parsedShape.points;
+                        restoredSeatGrid = parsedShape.seatGrid;
+                    } else if (parsedShape.kind === 'arc') {
+                        restoredShape = parsedShape.shape;
+                    }
                     area = {
                         id: areaId, title: areaTitle, code: areaCode, sectorId: secId,
                         rowMin: rowPos, rowMax: rowPos, seatMin: seatPos, seatMax: seatPos,
@@ -1318,6 +1337,7 @@
                         area.shape = restoredShape;
                         syncArcPoints(area);
                     }
+                    if (restoredSeatGrid) area.seatGrid = restoredSeatGrid;
                     if (groupId) area.groupId = groupId;
                     AppState.areas.push(area);
                 } else {
@@ -1676,19 +1696,19 @@
                             gSeats.appendChild(rect);
                         });
                     } else {
-                        const p0 = area.points[0], p1 = area.points[1], p3 = area.points[3];
-                        const dx1 = p1.x - p0.x, dy1 = p1.y - p0.y, len1 = Math.sqrt(dx1*dx1+dy1*dy1);
-                        const dx3 = p3.x - p0.x, dy3 = p3.y - p0.y, len3 = Math.sqrt(dx3*dx3+dy3*dy3);
-                        const ux = dx1 / len1, uy = dy1 / len1, vx = dx3 / len3, vy = dy3 / len3;
-
+                        // Polígono: usa area.seatGrid (rejilla absoluta independiente del polígono).
+                        // Lazy compute: si no existe, derivar de los puntos actuales una sola vez.
+                        if (!area.seatGrid && area.points && area.points.length >= 4) {
+                            area.seatGrid = ArcMath.computeSeatGridFromPolygon(area);
+                        }
                         AppState.seats.filter(s => s.areaId === area.id).forEach(seat => {
+                            const pos = ArcMath.seatPosFromGrid(area, seat.rowPos, seat.seatPos);
+                            if (!pos) return;
                             const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-                            const worldX = p0.x + ((seat.seatPos - area.seatMin) * GRID_STEP + 2) * ux + ((area.rowMax - seat.rowPos) * GRID_STEP + 2) * vx;
-                            const worldY = p0.y + ((seat.seatPos - area.seatMin) * GRID_STEP + 2) * uy + ((area.rowMax - seat.rowPos) * GRID_STEP + 2) * vy;
-                            rect.setAttribute("x", worldX); rect.setAttribute("y", worldY);
+                            rect.setAttribute("x", pos.x); rect.setAttribute("y", pos.y);
                             rect.setAttribute("width", GRID_STEP - 3); rect.setAttribute("height", GRID_STEP - 3);
                             rect.setAttribute("rx", 1); rect.className.baseVal = "seat-mini";
-                            rect.setAttribute("transform", `rotate(${Math.atan2(uy, ux) * (180/Math.PI)}, ${worldX}, ${worldY})`);
+                            rect.setAttribute("transform", `rotate(${pos.angleDeg}, ${pos.x}, ${pos.y})`);
                             gSeats.appendChild(rect);
                         });
                     }
@@ -2018,7 +2038,8 @@
             sel.forEach(a => snapshot.set(a.id, {
                 shape: a.shape ? JSON.parse(JSON.stringify(a.shape)) : null,
                 points: JSON.parse(JSON.stringify(a.points)),
-                groupId: a.groupId
+                groupId: a.groupId,
+                seatGrid: a.seatGrid ? JSON.parse(JSON.stringify(a.seatGrid)) : null
             }));
 
             // Detectar si todas las áreas ya son arcos del mismo grupo (re-edición).
@@ -2085,6 +2106,8 @@
                     if (snap.shape) a.shape = snap.shape;
                     else delete a.shape;
                     a.points = snap.points;
+                    if (snap.seatGrid) a.seatGrid = snap.seatGrid;
+                    else delete a.seatGrid;
                     if (snap.groupId) a.groupId = snap.groupId;
                 });
                 _fitArcCtx = null;
@@ -2141,6 +2164,8 @@
                     if (!pts) return;
                     area.points = pts;
                     delete area.shape;
+                    // Recomputar seatGrid para el nuevo polígono recto (los asientos siguen el área).
+                    area.seatGrid = ArcMath.computeSeatGridFromPolygon(area);
                 });
                 renderMap();
                 return;
@@ -2175,6 +2200,8 @@
                 if (!shape) return;
                 area.shape = ArcMath.clampArcShape(shape);
                 syncArcPoints(area);
+                // Al pasar a arco, seatGrid no aplica (la rejilla la define el shape arco).
+                delete area.seatGrid;
             });
             // Sincronizamos los campos avanzados.
             const sh0 = result[0].shape;
@@ -2193,26 +2220,25 @@
             const sel = _fitArcCtx.selected;
             const previewShapes = new Map(sel.map(a => [a.id, a.shape ? JSON.parse(JSON.stringify(a.shape)) : null]));
             const previewPoints = new Map(sel.map(a => [a.id, JSON.parse(JSON.stringify(a.points))]));
+            const previewSeatGrids = new Map(sel.map(a => [a.id, a.seatGrid ? JSON.parse(JSON.stringify(a.seatGrid)) : null]));
             // Restaurar snapshot temporalmente para guardar el historial en su estado previo.
             sel.forEach(a => {
                 const snap = _fitArcCtx.snapshot.get(a.id);
                 if (snap.shape) a.shape = snap.shape; else delete a.shape;
                 a.points = snap.points;
+                if (snap.seatGrid) a.seatGrid = snap.seatGrid; else delete a.seatGrid;
                 if (snap.groupId) a.groupId = snap.groupId; else delete a.groupId;
             });
             saveStateToHistory();
-            // Reaplicar el preview y agrupar.
-            // Si todas las áreas seleccionadas ya compartían un mismo groupId previo,
-            // lo conservamos (re-edición); si no, generamos uno nuevo.
             const prevGroupIds = new Set(sel.map(a => _fitArcCtx.snapshot.get(a.id).groupId).filter(Boolean));
             const arcGroupId = (prevGroupIds.size === 1) ? [...prevGroupIds][0] : `arc-${generateUUID()}`;
             sel.forEach(a => {
                 const sh = previewShapes.get(a.id);
                 if (sh) a.shape = sh; else delete a.shape;
                 a.points = previewPoints.get(a.id);
+                const sg = previewSeatGrids.get(a.id);
+                if (sg) a.seatGrid = sg; else delete a.seatGrid;
                 a.groupId = arcGroupId;
-                // Si AppState.groups tenía datos legacy para el groupId previo, los limpiamos
-                // sólo si nadie más lo usa.
             });
             // Limpiar grupos legacy huérfanos.
             Object.keys(AppState.groups).forEach(gid => {
@@ -2289,6 +2315,7 @@
             AppState.initialClickPoint = getMousePos(e);
             AppState.initialPointsMap = {};
             AppState.initialArcShapesMap = {};
+            AppState.initialSeatGridMap = {};
             AppState.initialGroupOriginalPoints = {};
 
             AppState.selectedAreaIds.forEach(id => {
@@ -2296,6 +2323,7 @@
                 if(a) {
                     AppState.initialPointsMap[id] = JSON.parse(JSON.stringify(a.points));
                     if (isArc(a)) AppState.initialArcShapesMap[id] = JSON.parse(JSON.stringify(a.shape));
+                    if (a.seatGrid) AppState.initialSeatGridMap[id] = JSON.parse(JSON.stringify(a.seatGrid));
                     if (a.groupId && AppState.groups[a.groupId] && AppState.groups[a.groupId].originalPointsMap[id]) {
                         AppState.initialGroupOriginalPoints[id] = JSON.parse(JSON.stringify(AppState.groups[a.groupId].originalPointsMap[id]));
                     }
@@ -2345,7 +2373,7 @@
             e.stopPropagation();
             e.preventDefault();
             saveStateToHistory();
-            AppState.interactionMode = 'rotate_area'; 
+            AppState.interactionMode = 'rotate_area';
             AppState.activeAreaId = area ? area.id : null;
             if (area && AppState.selectedAreaIds.length <= 1) {
                 AppState.initialCenter = getCentroid(area.points);
@@ -2354,9 +2382,13 @@
                 AppState.initialCenter = { x: groupBounds.centerX, y: groupBounds.centerY };
             }
             AppState.initialPointsMap = {};
+            AppState.initialSeatGridMap = {};
             AppState.selectedAreaIds.forEach(id => {
                 const a = AppState.areas.find(ar => ar.id === id);
-                if (a) AppState.initialPointsMap[id] = JSON.parse(JSON.stringify(a.points));
+                if (a) {
+                    AppState.initialPointsMap[id] = JSON.parse(JSON.stringify(a.points));
+                    if (a.seatGrid) AppState.initialSeatGridMap[id] = JSON.parse(JSON.stringify(a.seatGrid));
+                }
             });
             const m = getMousePos(e);
             AppState.initialAngle = Math.atan2(m.y - AppState.initialCenter.y, m.x - AppState.initialCenter.x);
@@ -2507,6 +2539,10 @@
                         syncArcPoints(a);
                     } else if (a && AppState.initialPointsMap[id]) {
                         a.points = AppState.initialPointsMap[id].map(p => ({x: p.x+dx, y: p.y+dy}));
+                        // Trasladar también el seatGrid para que los asientos sigan el área.
+                        if (AppState.initialSeatGridMap && AppState.initialSeatGridMap[id]) {
+                            a.seatGrid = ArcMath.translateSeatGrid(AppState.initialSeatGridMap[id], dx, dy);
+                        }
                     }
                 });
                 
@@ -2557,6 +2593,10 @@
                             x: cx + (p.x - cx) * cos - (p.y - cy) * sin,
                             y: cy + (p.x - cx) * sin + (p.y - cy) * cos
                         }));
+                    }
+                    // Rotar también el seatGrid para que los asientos giren con el área.
+                    if (a && AppState.initialSeatGridMap && AppState.initialSeatGridMap[id]) {
+                        a.seatGrid = ArcMath.rotateSeatGrid(AppState.initialSeatGridMap[id], cx, cy, deltaAngle);
                     }
                 });
             } else if (AppState.interactionMode === 'move_bg') {
@@ -3362,6 +3402,9 @@
             });
 
             document.getElementById('prop-in-group').classList.toggle('hidden', !a.groupId);
+
+            // Mostrar el botón "Reajustar grid" sólo para áreas polígono (con o sin grid).
+            document.getElementById('btn-rederive-grid').classList.toggle('hidden', isArc(a));
 
             const arcBlock = document.getElementById('prop-arc-block');
             const rectDims = document.getElementById('prop-rect-dims');

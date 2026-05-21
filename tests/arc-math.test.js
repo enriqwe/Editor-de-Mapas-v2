@@ -235,6 +235,75 @@ test('buildRingSegments: tribuna parcial (90° en 3 segs) cubre exactamente 90°
     assert.ok(approx(shapes[shapes.length - 1].endAngle, ArcMath.degToRad(45), 1e-9));
 });
 
+// -------- seatGrid de polígonos --------
+test('computeSeatGridFromPolygon: rectángulo 100×50 con 10×5 → spacing 10', () => {
+    const area = {
+        points: [{x:0,y:0},{x:100,y:0},{x:100,y:50},{x:0,y:50}],
+        seatMin: 1, seatMax: 10, rowMin: 1, rowMax: 5
+    };
+    const g = ArcMath.computeSeatGridFromPolygon(area);
+    assert.ok(approxPt(g.origin, {x:0, y:0}));
+    assert.ok(approx(g.seatSpacing, 10));
+    assert.ok(approx(g.rowSpacing, 10));
+    assert.ok(approx(g.seatAxis.x, 1) && approx(g.seatAxis.y, 0));
+    assert.ok(approx(g.rowAxis.x, 0) && approx(g.rowAxis.y, 1));
+});
+
+test('seatPosFromGrid: posición consistente con la bilineal en rectángulo axis-aligned', () => {
+    const area = {
+        points: [{x:0,y:0},{x:100,y:0},{x:100,y:50},{x:0,y:50}],
+        seatMin: 1, seatMax: 10, rowMin: 1, rowMax: 5
+    };
+    area.seatGrid = ArcMath.computeSeatGridFromPolygon(area);
+    // Fórmula bilineal original: x = p0.x + ((seatPos - seatMin) * 10 + 2) * ux
+    // En rectángulo axis-aligned con spacing 10: x = (seatPos-1)*10 + 2
+    const p = ArcMath.seatPosFromGrid(area, 3, 4);
+    assert.ok(approx(p.x, (4-1)*10 + 2));
+    assert.ok(approx(p.y, (5-3)*10 + 2));
+});
+
+test('seatPosFromGrid: cambiar el polígono NO mueve los asientos si seatGrid es fijo', () => {
+    const grid = {
+        origin: {x:0, y:0},
+        seatAxis: {x:1, y:0},
+        rowAxis: {x:0, y:1},
+        seatSpacing: 10,
+        rowSpacing: 10
+    };
+    const area = {
+        points: [{x:0,y:0},{x:100,y:0},{x:100,y:50},{x:0,y:50}],
+        seatMin: 1, seatMax: 10, rowMin: 1, rowMax: 5,
+        seatGrid: grid
+    };
+    const before = ArcMath.seatPosFromGrid(area, 3, 5);
+    // Arrastramos una esquina (p2) hacia abajo-derecha, deformando el polígono.
+    area.points = [{x:0,y:0},{x:100,y:0},{x:200,y:120},{x:0,y:50}];
+    const after = ArcMath.seatPosFromGrid(area, 3, 5);
+    assert.ok(approxPt(before, after), 'el asiento debe quedarse en su sitio');
+});
+
+test('translateSeatGrid: aplica delta a origen, no a ejes', () => {
+    const g = {
+        origin: {x:10, y:20}, seatAxis: {x:1, y:0}, rowAxis: {x:0, y:1},
+        seatSpacing: 10, rowSpacing: 10
+    };
+    const t = ArcMath.translateSeatGrid(g, 5, -3);
+    assert.deepEqual(t.origin, {x:15, y:17});
+    assert.deepEqual(t.seatAxis, g.seatAxis);
+});
+
+test('rotateSeatGrid: rota origen y ejes 90° CW alrededor del origen', () => {
+    const g = {
+        origin: {x:10, y:0}, seatAxis: {x:1, y:0}, rowAxis: {x:0, y:1},
+        seatSpacing: 10, rowSpacing: 10
+    };
+    const r = ArcMath.rotateSeatGrid(g, 0, 0, Math.PI/2);
+    // (1,0) → (0,1) en convención SVG (rotación positiva = horaria)
+    assert.ok(approx(r.origin.x, 0, 1e-9) && approx(r.origin.y, 10, 1e-9));
+    assert.ok(approx(r.seatAxis.x, 0, 1e-9) && approx(r.seatAxis.y, 1, 1e-9));
+    assert.ok(approx(r.rowAxis.x, -1, 1e-9) && approx(r.rowAxis.y, 0, 1e-9));
+});
+
 // -------- computeFrontDirection / averageFrontDirection --------
 test('computeFrontDirection: rectángulo estándar → (0,1) hacia abajo', () => {
     const area = rectAreaForTest(0, 0, 100, 50, 5, 10);
