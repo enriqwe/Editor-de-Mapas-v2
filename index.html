@@ -151,12 +151,6 @@
             <button onclick="distributeSelection('vertical')" class="p-1.5 hover:bg-gray-200 rounded text-gray-700" title="Distribuir Verticalmente" id="btn-dist-v">
                 <i data-lucide="stretch-vertical" class="w-4 h-4"></i>
             </button>
-
-            <!-- Botón para alinear en curva -->
-            <div class="w-px h-4 bg-gray-300 mx-1"></div>
-            <button onclick="startCurveAlignment()" class="p-1.5 hover:bg-purple-100 rounded text-purple-700 font-bold text-xs flex items-center gap-1" title="Alinear en Curva" id="btn-curve-align">
-                <i data-lucide="git-merge" class="w-4 h-4"></i> Curvar
-            </button>
         </div>
 
         <div class="flex gap-3 items-center">
@@ -199,19 +193,6 @@
         </div>
     </header>
 
-    <!-- UI Overlay de Curva -->
-    <div id="curve-banner" class="hidden absolute top-14 left-0 w-full bg-purple-600 text-white p-2 flex justify-center items-center gap-4 z-40 shadow-md">
-        <i data-lucide="info" class="w-5 h-5"></i>
-        <span id="curve-msg" class="font-medium text-sm">Paso 1: Haz clic y arrastra para dibujar la línea base de la curva.</span>
-        
-        <div id="curve-intensity-container" class="hidden flex items-center gap-2 bg-purple-800 px-2 py-1 rounded">
-            <label class="text-xs font-bold uppercase tracking-wider text-purple-200" title="Desplazamiento del centro (offset)">Curvatura:</label>
-            <input type="number" id="curve-intensity-input" class="w-16 text-black text-center text-xs p-1 rounded outline-none border-none shadow-inner" value="0" oninput="updateCurveFromInput()">
-        </div>
-
-        <button id="curve-apply" onclick="applyCurveAlignment()" class="hidden px-3 py-1 bg-white text-purple-700 font-bold rounded text-xs shadow-sm hover:bg-gray-100">Aplicar</button>
-        <button onclick="cancelCurveAlignment()" class="px-3 py-1 bg-purple-800 text-white font-bold rounded text-xs shadow-sm hover:bg-purple-900 border border-purple-500">Cancelar</button>
-    </div>
 
     <!-- Main Content -->
     <div class="flex flex-1 overflow-hidden relative">
@@ -2814,34 +2795,13 @@
                   
             [areaForm, sectorForm, noSel, multi, bg, groupForm].forEach(el => el.classList.add('hidden'));
             
-            // UI Banner de Curva Temporal
-            const curveBanner = document.getElementById('curve-banner');
-            const btnCurveAlign = document.getElementById('btn-curve-align');
-            const intensityContainer = document.getElementById('curve-intensity-container');
-            
-            if (AppState.curveAlignment && AppState.curveAlignment.active) {
-                curveBanner.classList.remove('hidden');
-                if (AppState.curveAlignment.step === 1) {
-                    document.getElementById('curve-msg').innerText = "Paso 1: Haz clic y arrastra en el mapa para dibujar la línea base de la curva.";
-                    document.getElementById('curve-apply').classList.add('hidden');
-                    intensityContainer.classList.add('hidden');
-                } else {
-                    document.getElementById('curve-msg').innerText = "Paso 2: Arrastra el punto central o ajusta el valor numérico.";
-                    document.getElementById('curve-apply').classList.remove('hidden');
-                    intensityContainer.classList.remove('hidden');
-                    document.getElementById('curve-intensity-input').value = calculateCurveIntensity();
-                }
-            } else {
-                curveBanner.classList.add('hidden');
-                intensityContainer.classList.add('hidden');
-            }
-
             // Lógica de Paneles Laterales
             if (!AppState.background.locked && AppState.background.selected && AppState.background.url) {
                 bg.classList.remove('hidden');
                 populateBgForm();
             } else if (AppState.activeGroupId && AppState.groups[AppState.activeGroupId]) {
-                // UI de GRUPO CURVO EXISTENTE
+                // UI de GRUPO CURVO EXISTENTE (legacy: solo aparece si el CSV importado
+                // ya traía un grupo bezier curvado con la versión anterior).
                 groupForm.classList.remove('hidden');
                 document.getElementById('prop-group-intensity').value = getCurveIntensity(
                     AppState.groups[AppState.activeGroupId].p0,
@@ -2849,18 +2809,14 @@
                     AppState.groups[AppState.activeGroupId].p2
                 );
                 document.getElementById('clipboard-tools').classList.remove('hidden');
-                btnCurveAlign.classList.add('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
             } else if (AppState.selectedAreaIds.length === 1) {
-                areaForm.classList.remove('hidden'); 
-                populateAreaForm(); 
+                areaForm.classList.remove('hidden');
+                populateAreaForm();
                 document.getElementById('clipboard-tools').classList.remove('hidden');
-                btnCurveAlign.classList.add('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
             } else if (AppState.selectedAreaIds.length > 1) {
                 multi.classList.remove('hidden');
                 document.getElementById('multi-count').innerText = AppState.selectedAreaIds.length;
                 document.getElementById('clipboard-tools').classList.remove('hidden');
-                btnCurveAlign.classList.remove('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
-                // Mostrar botón "Editar individual" si la selección es un grupo (todas comparten groupId).
                 const firstA = AppState.areas.find(a => a.id === AppState.selectedAreaIds[0]);
                 const isGroup = firstA?.groupId && AppState.selectedAreaIds.every(id => {
                     const a = AppState.areas.find(x => x.id === id);
@@ -2868,12 +2824,10 @@
                 });
                 document.getElementById('btn-enter-individual').classList.toggle('hidden', !isGroup);
             } else if (AppState.selectedSectorId) {
-                sectorForm.classList.remove('hidden'); 
-                populateSectorForm(); 
-                btnCurveAlign.classList.add('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
+                sectorForm.classList.remove('hidden');
+                populateSectorForm();
             } else {
                 noSel.classList.remove('hidden');
-                btnCurveAlign.classList.add('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
             }
             
             const btnP = document.getElementById('btn-paste-shape');
