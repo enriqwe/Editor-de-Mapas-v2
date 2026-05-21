@@ -216,15 +216,15 @@
             endAngle: shape.endAngle
         };
         if (out.outerR < out.innerR + minSep) out.outerR = out.innerR + minSep;
-        let sweep = out.endAngle - out.startAngle;
+        // No imponemos un sweep mínimo angular: en fitGroupAsArc con midRadius muy grande
+        // los sweeps son legítimamente pequeños (< 1°) y forzarlos al mínimo provocaba
+        // solapamiento masivo entre áreas. Solo evitamos el caso degenerado de sweep=0.
+        const sweep = out.endAngle - out.startAngle;
         const maxSweep = 2 * Math.PI;
-        const minSweep = degToRad(1);
-        if (Math.abs(sweep) < minSweep) {
-            sweep = sweep >= 0 ? minSweep : -minSweep;
-            out.endAngle = out.startAngle + sweep;
+        if (sweep === 0) {
+            out.endAngle = out.startAngle + 1e-6;
         } else if (Math.abs(sweep) > maxSweep) {
-            sweep = sweep > 0 ? maxSweep : -maxSweep;
-            out.endAngle = out.startAngle + sweep;
+            out.endAngle = out.startAngle + (sweep > 0 ? maxSweep : -maxSweep);
         }
         return out;
     }

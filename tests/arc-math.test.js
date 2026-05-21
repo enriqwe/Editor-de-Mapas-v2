@@ -649,9 +649,18 @@ test('clampArcShape: corrige innerR <= 0', () => {
     assert.ok(c.outerR > c.innerR);
 });
 
-test('clampArcShape: sweep mínimo es 1° si era cero', () => {
+test('clampArcShape: sweep cero se rescata a epsilon (no a 1° como antes)', () => {
     const c = ArcMath.clampArcShape({ ...baseShape, startAngle: 0, endAngle: 0 });
-    assert.ok(Math.abs(c.endAngle - c.startAngle) >= ArcMath.degToRad(1) - 1e-9);
+    assert.ok(c.endAngle > c.startAngle, 'epsilon positivo aplicado');
+    assert.ok(c.endAngle - c.startAngle < ArcMath.degToRad(0.01), 'mucho menor que 1°');
+});
+
+test('clampArcShape: NO infla sweeps pequeños pero válidos (regresión)', () => {
+    // Bug previo: minSweep=1° forzaba a 1° cualquier sweep menor, lo que en
+    // fit-to-arc con midRadius grande producía solapamiento entre áreas.
+    const tinySweep = ArcMath.degToRad(0.15);
+    const c = ArcMath.clampArcShape({ ...baseShape, startAngle: 0, endAngle: tinySweep });
+    assert.ok(approx(c.endAngle - c.startAngle, tinySweep, 1e-9));
 });
 
 test('clampArcShape: sweep máximo es 360°', () => {
