@@ -587,7 +587,7 @@
                 </div>
                 <div class="flex items-center gap-2 mt-2">
                     <input type="checkbox" id="fit-arc-sort" checked class="w-3 h-3" onchange="onFitArcInput()">
-                    <label for="fit-arc-sort" class="text-[10px] text-gray-600">Ordenar áreas por posición X actual</label>
+                    <label for="fit-arc-sort" class="text-[10px] text-gray-600">Ordenar áreas por posición (eje dominante)</label>
                 </div>
             </details>
         </div>
@@ -2152,14 +2152,21 @@
                     rowMin: a.rowMin, rowMax: a.rowMax, seatMin: a.seatMin, seatMax: a.seatMax,
                     isWedge: wedgeIds.has(a.id) };
             });
+            // Detecta el eje dominante de la selección (X si más ancha que alta, Y si más alta).
+            // Así las filas horizontales se ordenan izquierda→derecha y las columnas verticales
+            // se ordenan arriba→abajo, en lugar de forzar siempre por X.
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            sel.forEach(a => {
+                const c = getCentroid(_fitArcCtx.snapshot.get(a.id).points);
+                if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x;
+                if (c.y < minY) minY = c.y; if (c.y > maxY) maxY = c.y;
+            });
+            const sortAxis = (maxX - minX) >= (maxY - minY) ? 'x' : 'y';
             const ordered = sortByX
                 ? [...baseAreas].sort((a, b) => {
-                    const av = ArcMath.computeAreaNaturalSize(a);
-                    const bv = ArcMath.computeAreaNaturalSize(b);
-                    // Para ordenar por posición horizontal usamos la X actual real del centroide.
-                    const ap = sel.find(s => s.id === a.id);
-                    const bp = sel.find(s => s.id === b.id);
-                    return getCentroid(_fitArcCtx.snapshot.get(ap.id).points).x - getCentroid(_fitArcCtx.snapshot.get(bp.id).points).x;
+                    const ac = getCentroid(_fitArcCtx.snapshot.get(a.id).points);
+                    const bc = getCentroid(_fitArcCtx.snapshot.get(b.id).points);
+                    return sortAxis === 'x' ? ac.x - bc.x : ac.y - bc.y;
                 })
                 : baseAreas;
 
