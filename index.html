@@ -383,6 +383,7 @@
                         <button onclick="createNewSector()" class="text-indigo-600 border border-indigo-200 bg-white px-2 py-1 rounded shadow-sm text-xs font-bold">+ Sec</button>
                         <button onclick="createNewArea()" class="text-blue-600 border border-blue-200 bg-white px-2 py-1 rounded shadow-sm text-xs font-bold">+ Área</button>
                         <button onclick="createNewArcArea()" class="text-purple-600 border border-purple-200 bg-white px-2 py-1 rounded shadow-sm text-xs font-bold" title="Crea un área tipo arco (tribuna curva)">+ Arco</button>
+                        <button onclick="openStadiumRingWizard()" class="text-pink-600 border border-pink-200 bg-white px-2 py-1 rounded shadow-sm text-xs font-bold" title="Crea un anillo de tribunas dividido en N segmentos">Anillo</button>
                     </div>
                 </div>
                 <div id="tree-list" class="space-y-1 pb-4"></div>
@@ -511,6 +512,7 @@
                         <button onclick="showDivideDialog()" class="px-4 py-2 text-sm bg-orange-500 text-white rounded hover:bg-orange-600 font-medium transition-colors shadow-sm">Ejecutar División</button>
                         <button onclick="cancelDivideMode()" class="px-4 py-2 text-sm bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-50 transition-colors">Cancelar</button>
                     </div>
+                    <button onclick="createAisleFromSelection()" class="px-4 py-2 text-sm bg-white border border-purple-400 text-purple-700 rounded hover:bg-purple-50 transition-colors font-medium" title="Borra los asientos de las filas/columnas seleccionadas (deja huecos que en el CSV salen como ausencias)">Crear Pasillo</button>
                 </div>
                 <div class="flex gap-2">
                     <button onclick="fillAllSeats()" class="px-4 py-2 text-sm bg-white border border-gray-300 rounded text-gray-700 hover:bg-gray-100 transition-colors">Llenar Todo</button>
@@ -533,6 +535,67 @@
             <div class="flex gap-2 p-4 border-t bg-gray-50 rounded-b-lg justify-end">
                 <button onclick="closeDivideDialog()" class="px-4 py-2 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-100 transition-colors">Cancelar</button>
                 <button onclick="confirmDivide()" class="px-5 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 font-medium shadow-sm transition-colors">Confirmar División</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="ring-wizard-dialog" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] hidden">
+        <div class="bg-white rounded-lg shadow-2xl w-[460px] flex flex-col">
+            <div class="p-5 border-b">
+                <h2 class="font-bold text-lg text-gray-800">Wizard: Anillo de Tribunas</h2>
+                <p class="text-sm text-gray-500 mt-1">Crea N tribunas en arco distribuidas alrededor de un centro, perfectamente acopladas.</p>
+            </div>
+            <div class="p-5 space-y-3 text-sm">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600">Centro X</label>
+                        <input type="number" id="ring-cx" value="600" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600">Centro Y</label>
+                        <input type="number" id="ring-cy" value="400" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600">Radio interior</label>
+                        <input type="number" id="ring-inner" value="250" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600">Radio exterior</label>
+                        <input type="number" id="ring-outer" value="340" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600">Ángulo inicio (°)</label>
+                        <input type="number" id="ring-start" value="0" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600">Ángulo fin (°)</label>
+                        <input type="number" id="ring-end" value="360" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600">Número de tribunas</label>
+                        <input type="number" id="ring-segs" min="1" value="8" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600">Pasillo entre tribunas (°)</label>
+                        <input type="number" id="ring-gap" min="0" step="0.5" value="1" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600">Filas por tribuna</label>
+                        <input type="number" id="ring-rows" min="1" value="10" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600">Asientos por tribuna</label>
+                        <input type="number" id="ring-seats" min="1" value="20" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600">Prefijo código</label>
+                    <input type="text" id="ring-prefix" value="T" class="w-full mt-1 border-gray-300 rounded border p-1.5">
+                </div>
+            </div>
+            <div class="flex gap-2 p-4 border-t bg-gray-50 rounded-b-lg justify-end">
+                <button onclick="closeStadiumRingWizard()" class="px-4 py-2 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-100">Cancelar</button>
+                <button onclick="confirmStadiumRing()" class="px-5 py-2 text-sm bg-pink-600 text-white rounded hover:bg-pink-700 font-medium shadow-sm">Crear Anillo</button>
             </div>
         </div>
     </div>
@@ -1871,6 +1934,67 @@
             updateUI();
         }
 
+        function openStadiumRingWizard() {
+            const viewport = document.getElementById('main-viewport');
+            const rect = viewport.getBoundingClientRect();
+            const cx = (rect.width/2 - AppState.panX) / AppState.zoom;
+            const cy = (rect.height/2 - AppState.panY) / AppState.zoom;
+            document.getElementById('ring-cx').value = Math.round(cx);
+            document.getElementById('ring-cy').value = Math.round(cy);
+            document.getElementById('ring-wizard-dialog').classList.remove('hidden');
+        }
+
+        function closeStadiumRingWizard() {
+            document.getElementById('ring-wizard-dialog').classList.add('hidden');
+        }
+
+        function confirmStadiumRing() {
+            const num = (id) => parseFloat(document.getElementById(id).value);
+            const intg = (id) => parseInt(document.getElementById(id).value, 10);
+            const params = {
+                center: { x: num('ring-cx'), y: num('ring-cy') },
+                innerR: num('ring-inner'),
+                outerR: num('ring-outer'),
+                startAngleDeg: num('ring-start'),
+                endAngleDeg: num('ring-end'),
+                segments: intg('ring-segs'),
+                gapDeg: num('ring-gap')
+            };
+            if (!(params.innerR > 0) || !(params.outerR > params.innerR) || !(params.segments >= 1)) {
+                alert('Parámetros inválidos: revisa radios y número de segmentos.');
+                return;
+            }
+            const rows = Math.max(1, intg('ring-rows') || 1);
+            const seats = Math.max(1, intg('ring-seats') || 1);
+            const prefix = (document.getElementById('ring-prefix').value || 'T').trim();
+
+            saveStateToHistory();
+            const targetSectorId = AppState.selectedSectorId || AppState.sectors[0]?.id || 'default-sec';
+            if (AppState.sectors.length === 0) {
+                AppState.sectors.push({ id: 'default-sec', title: 'Sector General' });
+            }
+            const shapes = ArcMath.buildRingSegments(params);
+            const newIds = [];
+            shapes.forEach((shape, i) => {
+                const id = generateUniqueAreaId();
+                const code = `${prefix}${i + 1}`;
+                const area = {
+                    id, title: `Tribuna ${i + 1}`, code, sectorId: targetSectorId,
+                    shape: ArcMath.clampArcShape(shape),
+                    points: ArcMath.arcOutlinePoints(shape),
+                    rowMin: 1, rowMax: rows, seatMin: 1, seatMax: seats,
+                    rowLabelOffset: 0, puerta: ''
+                };
+                AppState.areas.push(area);
+                newIds.push(id);
+            });
+            AppState.expandedSectors.add(targetSectorId);
+            AppState.selectedAreaIds = newIds;
+            closeStadiumRingWizard();
+            renderMap();
+            updateUI();
+        }
+
         function createNewArcArea() {
             saveStateToHistory();
             const targetSectorId = AppState.selectedSectorId || AppState.sectors[0]?.id || 'default-sec';
@@ -2092,14 +2216,25 @@
                 const area = AppState.areas.find(ar => ar.id === AppState.activeAreaId);
                 if (area && AppState.initialArcShape) {
                     const init = AppState.initialArcShape;
-                    const newAngle = ArcMath.angleFromPoint(init.center, m);
-                    const newRadius = ArcMath.radiusFromPoint(init.center, m);
+                    let newAngle = ArcMath.angleFromPoint(init.center, m);
+                    let newRadius = ArcMath.radiusFromPoint(init.center, m);
                     const which = AppState.activeArcHandle;
+                    const isStart = which.startsWith('start');
+                    const isInner = which.endsWith('Inner');
+
+                    // SNAPPING: solo con otros arcos del mismo centro.
+                    const neighbors = AppState.areas
+                        .filter(a => a.id !== area.id && isArc(a))
+                        .map(a => a.shape);
+                    const probe = { ...init, [isStart ? 'startAngle' : 'endAngle']: newAngle };
+                    const snappedAngle = ArcMath.findSnapAngle(probe, isStart ? 'start' : 'end', neighbors, ArcMath.degToRad(2));
+                    if (snappedAngle !== null) newAngle = snappedAngle;
+                    const snappedR = ArcMath.findSnapRadius(init, newRadius, neighbors, 6);
+                    if (snappedR !== null) newRadius = snappedR;
+
                     const updated = { ...init, center: { ...init.center } };
-                    if (which === 'startInner' || which === 'startOuter') updated.startAngle = newAngle;
-                    if (which === 'endInner' || which === 'endOuter') updated.endAngle = newAngle;
-                    if (which === 'startInner' || which === 'endInner') updated.innerR = newRadius;
-                    if (which === 'startOuter' || which === 'endOuter') updated.outerR = newRadius;
+                    if (isStart) updated.startAngle = newAngle; else updated.endAngle = newAngle;
+                    if (isInner) updated.innerR = newRadius; else updated.outerR = newRadius;
                     area.shape = ArcMath.clampArcShape(updated);
                     syncArcPoints(area);
                 }
@@ -3103,6 +3238,34 @@
         
         function fillAllSeats() { saveStateToHistory(); const a = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]); if(a) { for(let r=a.rowMin; r<=a.rowMax; r++) for(let s=a.seatMin; s<=a.seatMax; s++) toggleSeat(a,r,s,true); renderSeatGrid(a); } }
         function clearAllSeats() { saveStateToHistory(); const a = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]); if(a && confirm("¿Vaciar?")) { for(let r=a.rowMin; r<=a.rowMax; r++) for(let s=a.seatMin; s<=a.seatMax; s++) toggleSeat(a,r,s,false); renderSeatGrid(a); } }
+
+        /**
+         * Fase 3: pasillo = ausencia. Borra los asientos de las columnas/filas
+         * seleccionadas. El modelo de área no cambia (seatMin/seatMax/rowMin/rowMax
+         * se mantienen). El CSV exportará simplemente sin filas para esos asientos.
+         */
+        function createAisleFromSelection() {
+            const a = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
+            if (!a) return;
+            const cols = AppState.selectedColumns || [];
+            const rows = AppState.selectedRows || [];
+            if (cols.length === 0 && rows.length === 0) {
+                alert('Selecciona al menos una columna o fila (clic en su cabecera) para convertirla en pasillo.');
+                return;
+            }
+            saveStateToHistory();
+            const removed = AppState.seats.filter(s =>
+                s.areaId === a.id && (cols.includes(s.seatPos) || rows.includes(s.rowPos))
+            ).length;
+            AppState.seats = AppState.seats.filter(s =>
+                !(s.areaId === a.id && (cols.includes(s.seatPos) || rows.includes(s.rowPos)))
+            );
+            AppState.selectedColumns = [];
+            AppState.selectedRows = [];
+            renderSeatGrid(a);
+            document.getElementById('seat-count-display').innerText =
+                `${AppState.seats.filter(x => x.areaId === a.id).length} Asientos (-${removed} pasillo)`;
+        }
 
         function deleteSelectedArea() {
             if(confirm("¿Eliminar área seleccionada?")) {

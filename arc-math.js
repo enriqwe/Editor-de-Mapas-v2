@@ -126,6 +126,28 @@
     }
 
     /**
+     * Snap de radio: si `value` está dentro de `tol` de algún radio (inner/outer)
+     * de los arcos vecinos *con el mismo centro*, devuelve ese radio; si no, null.
+     */
+    function findSnapRadius(draggedShape, value, neighbors, tol) {
+        tol = tol == null ? 6 : tol;
+        if (!isArcShape(draggedShape)) return null;
+        let best = null;
+        for (const n of neighbors) {
+            if (!isArcShape(n)) continue;
+            if (Math.abs(draggedShape.center.x - n.center.x) > 0.5) continue;
+            if (Math.abs(draggedShape.center.y - n.center.y) > 0.5) continue;
+            for (const cand of [n.innerR, n.outerR]) {
+                const diff = Math.abs(value - cand);
+                if (diff <= tol && (best === null || diff < best.diff)) {
+                    best = { value: cand, diff };
+                }
+            }
+        }
+        return best ? best.value : null;
+    }
+
+    /**
      * Genera un anillo completo o parcial dividido en N segmentos de igual tamaño.
      * Devuelve los `shape` de arco listos para crear áreas. Cada uno empieza donde
      * acaba el anterior + un gap angular configurable (que en el modelo es solo
@@ -252,7 +274,7 @@
         isArcShape, isArcArea,
         arcOutlinePoints, arcPathD, arcCentroid, arcSeatPos,
         degToRad, radToDeg, normalizeAngle,
-        arcsAreCompatible, findSnapAngle,
+        arcsAreCompatible, findSnapAngle, findSnapRadius,
         buildRingSegments,
         defaultArcShape, clampArcShape,
         angleFromPoint, radiusFromPoint,

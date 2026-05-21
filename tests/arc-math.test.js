@@ -169,6 +169,35 @@ test('findSnapAngle: ignora vecinos no compatibles (otro centro)', () => {
     assert.equal(snapped, null);
 });
 
+// -------- findSnapRadius --------
+test('findSnapRadius: snapea al innerR del vecino dentro de tol', () => {
+    const dragged = { ...baseShape };
+    const neighbor = { ...baseShape, innerR: 100, outerR: 130 };
+    const snapped = ArcMath.findSnapRadius(dragged, 103, [neighbor], 6);
+    assert.equal(snapped, 100);
+});
+
+test('findSnapRadius: snapea al outerR si es más cercano', () => {
+    const dragged = { ...baseShape };
+    const neighbor = { ...baseShape, innerR: 100, outerR: 130 };
+    const snapped = ArcMath.findSnapRadius(dragged, 128, [neighbor], 6);
+    assert.equal(snapped, 130);
+});
+
+test('findSnapRadius: fuera de tolerancia → null', () => {
+    const dragged = { ...baseShape };
+    const neighbor = { ...baseShape, innerR: 100, outerR: 130 };
+    const snapped = ArcMath.findSnapRadius(dragged, 80, [neighbor], 6);
+    assert.equal(snapped, null);
+});
+
+test('findSnapRadius: ignora vecinos con otro centro', () => {
+    const dragged = { ...baseShape };
+    const neighbor = { ...baseShape, center: { x: 999, y: 999 }, innerR: 100 };
+    const snapped = ArcMath.findSnapRadius(dragged, 102, [neighbor], 6);
+    assert.equal(snapped, null);
+});
+
 // -------- buildRingSegments --------
 test('buildRingSegments: 4 segmentos en anillo completo, sin gaps, son contiguos', () => {
     const shapes = ArcMath.buildRingSegments({
@@ -286,6 +315,36 @@ test('angleFromPoint: (0,1) respecto a origen = PI/2 (SVG)', () => {
 
 test('radiusFromPoint: pitagoras 3-4-5', () => {
     assert.ok(approx(ArcMath.radiusFromPoint({ x: 0, y: 0 }, { x: 3, y: 4 }), 5));
+});
+
+// -------- Fase 3: huecos / pasillos --------
+test('Fase 3: borrar asientos del medio no desplaza los demás (seatPos invariante)', () => {
+    const area = {
+        shape: baseShape,
+        rowMin: 1, rowMax: 1, seatMin: 1, seatMax: 10
+    };
+    const seats = [];
+    for (let s = 1; s <= 10; s++) seats.push({ rowPos: 1, seatPos: s });
+
+    const posBeforeGap = seats.map(s => ArcMath.arcSeatPos(area, s.rowPos, s.seatPos));
+    // Simulamos un pasillo: eliminamos asientos 5 y 6
+    const remaining = seats.filter(s => s.seatPos !== 5 && s.seatPos !== 6);
+    // El seatMin/seatMax NO cambia — el rango angular sigue siendo el mismo.
+    const posAfterGap = remaining.map(s => ArcMath.arcSeatPos(area, s.rowPos, s.seatPos));
+    // Cada asiento que aún existe debe estar en la MISMA posición que antes.
+    remaining.forEach((s, i) => {
+        const before = posBeforeGap.find(p => p && p === posBeforeGap[seats.findIndex(x => x.seatPos === s.seatPos)]);
+        assert.ok(approxPt(before, posAfterGap[i]),
+            `seat ${s.seatPos} cambió de posición al haber huecos`);
+    });
+});
+
+test('Fase 3: serializeAreaShape de arco con huecos solo emite el shape (no info de asientos)', () => {
+    // El shape es independiente de qué asientos existan: los huecos viven solo en AppState.seats
+    const arc = { ...baseShape };
+    const area1 = { shape: arc, points: [] };
+    const area2 = { shape: arc, points: [] };
+    assert.equal(ArcMath.serializeAreaShape(area1), ArcMath.serializeAreaShape(area2));
 });
 
 test('round-trip: parse(serialize(arc area)) preserva shape', () => {
