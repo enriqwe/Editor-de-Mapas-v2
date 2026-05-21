@@ -551,9 +551,9 @@
         </div>
         <div class="p-3 space-y-3 text-sm border-t">
             <div>
-                <label class="block text-xs font-medium text-gray-600">Distancia al centro (radio medio)</label>
-                <input type="range" id="fit-arc-radius" min="100" max="3000" step="10" class="w-full mt-1" oninput="onFitArcInput()">
-                <div class="text-[10px] text-gray-500 flex justify-between"><span>100</span><span id="fit-arc-radius-val" class="font-bold text-gray-700">—</span><span>3000</span></div>
+                <label class="block text-xs font-medium text-gray-600">Curvatura</label>
+                <input type="range" id="fit-arc-curvature" min="0" max="100" step="1" value="100" class="w-full mt-1" oninput="onFitArcInput()">
+                <div class="text-[10px] text-gray-500 flex justify-between"><span>Curva máx.</span><span><span id="fit-arc-curvature-val" class="font-bold text-gray-700">100</span>%</span><span>Recto</span></div>
             </div>
             <div>
                 <label class="block text-xs font-medium text-gray-600">Distribución</label>
@@ -1708,6 +1708,34 @@
                     arrow.setAttribute("stroke-width", "3");
                     arrow.setAttribute("marker-end", "url(#arrowhead)");
                     g.appendChild(arrow);
+                } else {
+                    // Arco: la fila más baja (rowMin) está en el arco interior; el "frente" mira al centro.
+                    const sh = area.shape;
+                    const midAngle = (sh.startAngle + sh.endAngle) / 2;
+                    const innerMid = { x: sh.center.x + sh.innerR * Math.cos(midAngle), y: sh.center.y + sh.innerR * Math.sin(midAngle) };
+                    // Línea de frente: el propio arco interior.
+                    const frontPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                    const a0 = sh.startAngle, a1 = sh.endAngle;
+                    const sweep = a1 - a0;
+                    const large = Math.abs(sweep) > Math.PI ? 1 : 0;
+                    const sf = sweep > 0 ? 1 : 0;
+                    const fp0 = { x: sh.center.x + sh.innerR * Math.cos(a0), y: sh.center.y + sh.innerR * Math.sin(a0) };
+                    const fp1 = { x: sh.center.x + sh.innerR * Math.cos(a1), y: sh.center.y + sh.innerR * Math.sin(a1) };
+                    frontPath.setAttribute("d", `M ${fp0.x} ${fp0.y} A ${sh.innerR} ${sh.innerR} 0 ${large} ${sf} ${fp1.x} ${fp1.y}`);
+                    frontPath.setAttribute("class", "front-edge");
+                    frontPath.setAttribute("fill", "none");
+                    g.appendChild(frontPath);
+                    // Flecha radial hacia el centro
+                    const dirX = sh.center.x - innerMid.x, dirY = sh.center.y - innerMid.y;
+                    const dlen = Math.hypot(dirX, dirY) || 1;
+                    const arrow = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    arrow.setAttribute("class", "front-arrow");
+                    arrow.setAttribute("x1", innerMid.x); arrow.setAttribute("y1", innerMid.y);
+                    arrow.setAttribute("x2", innerMid.x + (dirX/dlen) * 18); arrow.setAttribute("y2", innerMid.y + (dirY/dlen) * 18);
+                    arrow.setAttribute("stroke", "#ef4444");
+                    arrow.setAttribute("stroke-width", "3");
+                    arrow.setAttribute("marker-end", "url(#arrowhead)");
+                    g.appendChild(arrow);
                 }
 
                 // Handles para arcos (Fase 2): 4 endpoints (inner/outer × start/end) + marcador de centro
@@ -1968,7 +1996,7 @@
          * Sólo se les asigna un shape de arco contiguo. autoFitArcParams se
          * encarga de derivar radios y sweep que preserven el tamaño de celda.
          */
-        let _fitArcCtx = null; // { selected: Area[], original: Map<id, area> snapshot }
+        let _fitArcCtx = null; // { selected, snapshot, totalArcLen, selCenter }
 
         function openFitToArcPanel() {
             const sel = AppState.selectedAreaIds.map(id => AppState.areas.find(a => a.id === id)).filter(Boolean);
@@ -1976,41 +2004,46 @@
                 alert('Selecciona al menos 2 áreas para acoplarlas en arco.');
                 return;
             }
-            // Snapshot para poder cancelar restaurando el estado original.
             const snapshot = new Map();
             sel.forEach(a => snapshot.set(a.id, {
                 shape: a.shape ? JSON.parse(JSON.stringify(a.shape)) : null,
                 points: JSON.parse(JSON.stringify(a.points)),
                 groupId: a.groupId
             }));
-            _fitArcCtx = { selected: sel, snapshot };
 
-            // Calcular defaults inteligentes: centro debajo de la selección, midRadius
-            // tal que el sweep cubra el ancho actual sin deformar las celdas.
+            // Cálculos invariantes: ancho total de la selección + centroide (sirven como base
+            // para todas las operaciones del panel).
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            let totalWidth = 0;
             sel.forEach(a => {
                 const b = getBounds(a.points);
                 minX = Math.min(minX, b.minX); maxX = Math.max(maxX, b.maxX);
                 minY = Math.min(minY, b.minY); maxY = Math.max(maxY, b.maxY);
+                totalWidth += b.width;
             });
-            const selCx = (minX + maxX) / 2, selCy = (minY + maxY) / 2;
-            const initialMidR = Math.max(maxX - minX, 400); // por defecto, radio grande → curva suave
-            const initialCenter = { x: selCx, y: selCy + initialMidR };
+            const selCenter = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+
+            _fitArcCtx = { selected: sel, snapshot, totalArcLen: totalWidth, selCenter };
+
+            // Defaults: curvatura inicial al 100% (recta = sin cambio); el usuario decide la curva.
+            const initialPct = 100;
+            const direction = { x: 0, y: 1 }; // por defecto el centro queda debajo
+            const initialMidR = ArcMath.curvaturePctToMidRadius(initialPct, totalWidth);
+            const cx = selCenter.x + direction.x * Math.min(initialMidR, 50000);
+            const cy = selCenter.y + direction.y * Math.min(initialMidR, 50000);
 
             document.getElementById('fit-arc-count').innerText = sel.length;
-            document.getElementById('fit-arc-radius').value = Math.round(initialMidR);
-            document.getElementById('fit-arc-radius-val').innerText = Math.round(initialMidR);
+            document.getElementById('fit-arc-curvature').value = initialPct;
+            document.getElementById('fit-arc-curvature-val').innerText = initialPct;
+            document.getElementById('fit-arc-cx').value = Math.round(cx);
+            document.getElementById('fit-arc-cy').value = Math.round(cy);
+            // El bloque avanzado se rellena cuando hay curvatura < 100.
+            document.getElementById('fit-arc-inner').value = '';
+            document.getElementById('fit-arc-outer').value = '';
+            document.getElementById('fit-arc-start').value = '';
+            document.getElementById('fit-arc-end').value = '';
 
-            const params = ArcMath.autoFitArcParams(sel, { center: initialCenter, midRadius: initialMidR });
-            document.getElementById('fit-arc-cx').value = Math.round(params.center.x);
-            document.getElementById('fit-arc-cy').value = Math.round(params.center.y);
-            document.getElementById('fit-arc-inner').value = Math.round(params.innerR);
-            document.getElementById('fit-arc-outer').value = Math.round(params.outerR);
-            document.getElementById('fit-arc-start').value = Math.round(params.startAngleDeg);
-            document.getElementById('fit-arc-end').value = Math.round(params.endAngleDeg);
             document.getElementById('fit-arc-panel').classList.remove('hidden');
-
-            // Aplica preview inmediatamente.
             applyFitArcPreview();
             lucide.createIcons();
         }
@@ -2034,56 +2067,67 @@
         }
 
         function onFitArcInput() {
-            // Si el usuario mueve el slider de radio, recomputamos auto params
-            // (re-deriva innerR/outerR/start/end preservando tamaño de celda).
-            // Si toca campos avanzados, esos valores ganan.
-            const radiusEl = document.getElementById('fit-arc-radius');
-            const radiusVal = parseFloat(radiusEl.value);
-            document.getElementById('fit-arc-radius-val').innerText = Math.round(radiusVal);
+            if (!_fitArcCtx) return;
+            const curvEl = document.getElementById('fit-arc-curvature');
+            const pct = parseFloat(curvEl.value);
+            document.getElementById('fit-arc-curvature-val').innerText = Math.round(pct);
 
-            if (_fitArcCtx && document.activeElement === radiusEl) {
-                const sel = _fitArcCtx.selected;
-                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-                sel.forEach(a => {
-                    const snap = _fitArcCtx.snapshot.get(a.id);
-                    const pts = snap ? snap.points : a.points;
-                    const b = getBounds(pts);
-                    minX = Math.min(minX, b.minX); maxX = Math.max(maxX, b.maxX);
-                    minY = Math.min(minY, b.minY); maxY = Math.max(maxY, b.maxY);
-                });
-                const selCx = (minX + maxX) / 2, selCy = (minY + maxY) / 2;
-                const cx = parseFloat(document.getElementById('fit-arc-cx').value);
-                const cy = parseFloat(document.getElementById('fit-arc-cy').value);
-                // Mantener la dirección del centro respecto a la selección, ajustar distancia.
-                const dx = cx - selCx, dy = cy - selCy;
-                const curDist = Math.sqrt(dx * dx + dy * dy) || 1;
-                const newCx = selCx + dx * (radiusVal / curDist);
-                const newCy = selCy + dy * (radiusVal / curDist);
-                // Recompute todos los demás campos a partir de centro + radio.
-                const orig = sel.map(a => {
-                    const snap = _fitArcCtx.snapshot.get(a.id);
-                    return {
-                        points: snap.points,
-                        rowMin: a.rowMin, rowMax: a.rowMax,
-                        seatMin: a.seatMin, seatMax: a.seatMax
-                    };
-                });
-                const auto = ArcMath.autoFitArcParams(orig, {
-                    center: { x: newCx, y: newCy },
-                    midRadius: radiusVal
-                });
-                document.getElementById('fit-arc-cx').value = Math.round(auto.center.x);
-                document.getElementById('fit-arc-cy').value = Math.round(auto.center.y);
-                document.getElementById('fit-arc-inner').value = Math.round(auto.innerR);
-                document.getElementById('fit-arc-outer').value = Math.round(auto.outerR);
-                document.getElementById('fit-arc-start').value = Math.round(auto.startAngleDeg);
-                document.getElementById('fit-arc-end').value = Math.round(auto.endAngleDeg);
+            const advFields = ['fit-arc-cx','fit-arc-cy','fit-arc-inner','fit-arc-outer','fit-arc-start','fit-arc-end'];
+            const userEditingAdv = advFields.includes(document.activeElement?.id);
+
+            if (!userEditingAdv) {
+                // Slider o distribución: recomputamos centro a la distancia que dicta pct,
+                // manteniendo la dirección actual (o por defecto, abajo).
+                const midR = ArcMath.curvaturePctToMidRadius(pct, _fitArcCtx.totalArcLen);
+                const selC = _fitArcCtx.selCenter;
+                const cxCur = parseFloat(document.getElementById('fit-arc-cx').value);
+                const cyCur = parseFloat(document.getElementById('fit-arc-cy').value);
+                let dx = cxCur - selC.x, dy = cyCur - selC.y;
+                const norm = Math.hypot(dx, dy);
+                if (!norm || !Number.isFinite(norm)) { dx = 0; dy = 1; }
+                else { dx /= norm; dy /= norm; }
+                const finiteR = Number.isFinite(midR) ? midR : 50000;
+                const newCx = selC.x + dx * finiteR;
+                const newCy = selC.y + dy * finiteR;
+                document.getElementById('fit-arc-cx').value = Math.round(newCx);
+                document.getElementById('fit-arc-cy').value = Math.round(newCy);
+
+                if (Number.isFinite(midR)) {
+                    const orig = _fitArcCtx.selected.map(a => {
+                        const snap = _fitArcCtx.snapshot.get(a.id);
+                        return { points: snap.points, rowMin: a.rowMin, rowMax: a.rowMax, seatMin: a.seatMin, seatMax: a.seatMax };
+                    });
+                    const auto = ArcMath.autoFitArcParams(orig, { center: { x: newCx, y: newCy }, midRadius: midR });
+                    document.getElementById('fit-arc-inner').value = Math.round(auto.innerR);
+                    document.getElementById('fit-arc-outer').value = Math.round(auto.outerR);
+                    document.getElementById('fit-arc-start').value = Math.round(auto.startAngleDeg);
+                    document.getElementById('fit-arc-end').value = Math.round(auto.endAngleDeg);
+                } else {
+                    document.getElementById('fit-arc-inner').value = '';
+                    document.getElementById('fit-arc-outer').value = '';
+                    document.getElementById('fit-arc-start').value = '';
+                    document.getElementById('fit-arc-end').value = '';
+                }
             }
             applyFitArcPreview();
         }
 
         function applyFitArcPreview() {
             if (!_fitArcCtx) return;
+            const pct = parseFloat(document.getElementById('fit-arc-curvature').value);
+
+            // pct = 100% → línea recta: restaurar el snapshot (sin curvar).
+            if (pct >= 99.5) {
+                _fitArcCtx.selected.forEach(a => {
+                    const snap = _fitArcCtx.snapshot.get(a.id);
+                    if (snap.shape) a.shape = JSON.parse(JSON.stringify(snap.shape));
+                    else delete a.shape;
+                    a.points = JSON.parse(JSON.stringify(snap.points));
+                });
+                renderMap();
+                return;
+            }
+
             const num = (id) => parseFloat(document.getElementById(id).value);
             const params = {
                 center: { x: num('fit-arc-cx'), y: num('fit-arc-cy') },
@@ -2096,7 +2140,6 @@
             if (!(params.innerR > 0) || !(params.outerR > params.innerR)) return;
             const sortByX = document.getElementById('fit-arc-sort').checked;
             const sel = _fitArcCtx.selected;
-            // Usamos siempre los points originales (snapshot) para ordenar.
             const ordered = sortByX
                 ? [...sel].sort((a, b) => {
                     const ap = _fitArcCtx.snapshot.get(a.id).points;
@@ -2117,30 +2160,46 @@
 
         function confirmFitToArc() {
             if (!_fitArcCtx) return;
-            // Aplica preview una última vez con los valores actuales y persiste.
             applyFitArcPreview();
-            // Guardar historia ANTES del cambio (snapshot restaurable).
-            // Para hacer history correcto, restauramos el snapshot, guardamos, y volvemos a aplicar.
             const sel = _fitArcCtx.selected;
-            // Restaurar snapshot temporalmente.
             const previewShapes = new Map(sel.map(a => [a.id, a.shape ? JSON.parse(JSON.stringify(a.shape)) : null]));
             const previewPoints = new Map(sel.map(a => [a.id, JSON.parse(JSON.stringify(a.points))]));
+            // Restaurar snapshot temporalmente para guardar el historial en su estado previo.
             sel.forEach(a => {
                 const snap = _fitArcCtx.snapshot.get(a.id);
                 if (snap.shape) a.shape = snap.shape; else delete a.shape;
                 a.points = snap.points;
-                if (snap.groupId) a.groupId = snap.groupId;
+                if (snap.groupId) a.groupId = snap.groupId; else delete a.groupId;
             });
             saveStateToHistory();
-            // Reaplicar el preview.
+            // Reaplicar el preview y agrupar.
+            // Si todas las áreas seleccionadas ya compartían un mismo groupId previo,
+            // lo conservamos (re-edición); si no, generamos uno nuevo.
+            const prevGroupIds = new Set(sel.map(a => _fitArcCtx.snapshot.get(a.id).groupId).filter(Boolean));
+            const arcGroupId = (prevGroupIds.size === 1) ? [...prevGroupIds][0] : `arc-${generateUUID()}`;
             sel.forEach(a => {
                 const sh = previewShapes.get(a.id);
                 if (sh) a.shape = sh; else delete a.shape;
                 a.points = previewPoints.get(a.id);
-                if (a.groupId) delete a.groupId; // sale del grupo curvo legacy si lo tenía
+                a.groupId = arcGroupId;
+                // Si AppState.groups tenía datos legacy para el groupId previo, los limpiamos
+                // sólo si nadie más lo usa.
             });
+            // Limpiar grupos legacy huérfanos.
+            Object.keys(AppState.groups).forEach(gid => {
+                const stillUsed = AppState.areas.some(a => a.groupId === gid);
+                if (!stillUsed) delete AppState.groups[gid];
+            });
+            // Asegurar que NO existe entrada en AppState.groups para el arcGroupId
+            // (los grupos de arco son shapeless: la persistencia vive en cada area.shape).
+            if (AppState.groups[arcGroupId]) delete AppState.groups[arcGroupId];
+
             _fitArcCtx = null;
             document.getElementById('fit-arc-panel').classList.add('hidden');
+            // Mantener la selección y marcar el grupo como activo.
+            AppState.selectedAreaIds = sel.map(a => a.id);
+            AppState.isolatedAreaId = null;
+            updateActiveGroup();
             renderMap();
             updateUI();
         }

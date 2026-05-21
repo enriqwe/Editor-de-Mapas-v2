@@ -323,6 +323,39 @@ test('fitAreasToArc: lista vacía → []', () => {
     assert.deepEqual(result, []);
 });
 
+// -------- curvaturePctToMidRadius / midRadiusToCurvaturePct --------
+test('curvaturePctToMidRadius: 100% → infinito (recta)', () => {
+    assert.equal(ArcMath.curvaturePctToMidRadius(100, 300), Infinity);
+});
+
+test('curvaturePctToMidRadius: 0% → L/π (media circunferencia)', () => {
+    const r = ArcMath.curvaturePctToMidRadius(0, 300);
+    assert.ok(approx(r, 300 / Math.PI, 1e-6));
+});
+
+test('curvaturePctToMidRadius: 50% → 2L/π (cuarto de circunferencia)', () => {
+    const r = ArcMath.curvaturePctToMidRadius(50, 300);
+    // k = (1-0.5)×π/L = 0.5×π/L → R = 2L/π
+    assert.ok(approx(r, 2 * 300 / Math.PI, 1e-6));
+});
+
+test('midRadiusToCurvaturePct: ida y vuelta consistente', () => {
+    const L = 500;
+    for (const pct of [0, 10, 50, 75, 99]) {
+        const r = ArcMath.curvaturePctToMidRadius(pct, L);
+        const back = ArcMath.midRadiusToCurvaturePct(r, L);
+        assert.ok(approx(back, pct, 1e-3));
+    }
+});
+
+test('midRadiusToCurvaturePct: midR muy grande → 100%', () => {
+    assert.ok(ArcMath.midRadiusToCurvaturePct(1e9, 300) > 99.99);
+});
+
+test('midRadiusToCurvaturePct: midR ≤ L/π → 0% (clampeado)', () => {
+    assert.equal(ArcMath.midRadiusToCurvaturePct(50, 300), 0);
+});
+
 // -------- autoFitArcParams: preservación de tamaño de celda --------
 function rectAreaForTest(cx, cy, w, h, nRows, nSeats) {
     return {

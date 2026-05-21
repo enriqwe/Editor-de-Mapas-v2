@@ -241,6 +241,29 @@
     }
 
     /**
+     * Mapeo "porcentaje de curvatura" ↔ midRadius.
+     *  - pct = 100 → línea recta (radio infinito)
+     *  - pct = 0   → media circunferencia: el sweep cubre exactamente π rad
+     *  Lineal en 1/R: k = (1 - pct/100) × π / L
+     */
+    function curvaturePctToMidRadius(pct, totalArcLen) {
+        if (!(totalArcLen > 0)) return Infinity;
+        if (pct >= 100 - 1e-6) return Infinity;
+        if (pct <= 1e-6) return totalArcLen / Math.PI;
+        const k = (1 - pct / 100) * Math.PI / totalArcLen;
+        return 1 / k;
+    }
+
+    function midRadiusToCurvaturePct(midR, totalArcLen) {
+        if (!(totalArcLen > 0)) return 100;
+        if (!Number.isFinite(midR) || midR <= 0) return 100;
+        const minR = totalArcLen / Math.PI;
+        if (midR <= minR) return 0;
+        const pct = 100 * (1 - minR / midR);
+        return Math.max(0, Math.min(100, pct));
+    }
+
+    /**
      * Dado un conjunto de áreas rectangulares y un centro objetivo, calcula los
      * parámetros del arco que las acoplará SIN deformar los asientos:
      *  - innerR/outerR: derivados del nº máximo de filas × paso radial original,
@@ -431,6 +454,7 @@
         degToRad, radToDeg, normalizeAngle,
         arcsAreCompatible, findSnapAngle, findSnapRadius,
         buildRingSegments, fitAreasToArc, autoFitArcParams,
+        curvaturePctToMidRadius, midRadiusToCurvaturePct,
         defaultArcShape, clampArcShape,
         angleFromPoint, radiusFromPoint,
         parseAreaShape, serializeAreaShape
