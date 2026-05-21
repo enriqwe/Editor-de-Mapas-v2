@@ -2181,21 +2181,23 @@
                     rowMin: a.rowMin, rowMax: a.rowMax, seatMin: a.seatMin, seatMax: a.seatMax,
                     isWedge: wedgeIds.has(a.id) };
             });
-            // Detecta el eje dominante de la selección (X si más ancha que alta, Y si más alta).
-            // Así las filas horizontales se ordenan izquierda→derecha y las columnas verticales
-            // se ordenan arriba→abajo, en lugar de forzar siempre por X.
-            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-            sel.forEach(a => {
-                const c = getCentroid(_fitArcCtx.snapshot.get(a.id).points);
-                if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x;
-                if (c.y < minY) minY = c.y; if (c.y > maxY) maxY = c.y;
-            });
-            const sortAxis = (maxX - minX) >= (maxY - minY) ? 'x' : 'y';
+            // Ordena por la proyección del centroide sobre el TANGENTE del arco en su
+            // orientación. Tangente = frontDir rotado 90° CW. Esto da el mismo orden que
+            // los slots tienen dentro del arco (primer slot = en dirección -tangent desde
+            // el centroide de la selección). El resultado: cada área queda exactamente en
+            // la misma posición visual donde estaba originalmente.
+            //   front DOWN  → tangent ( 1, 0) → sort por X asc.   (fila L→R, primer slot a la izq.)
+            //   front RIGHT → tangent ( 0,-1) → sort por -Y asc.  (col, primer slot abajo)
+            //   front UP    → tangent (-1, 0) → sort por -X asc.  (fila, primer slot a la dcha.)
+            //   front LEFT  → tangent ( 0, 1) → sort por Y asc.   (col, primer slot arriba)
+            const fd = _fitArcCtx.frontDir || { x: 0, y: 1 };
+            const tangent = { x: fd.y, y: -fd.x };
             const ordered = sortByX
                 ? [...baseAreas].sort((a, b) => {
                     const ac = getCentroid(_fitArcCtx.snapshot.get(a.id).points);
                     const bc = getCentroid(_fitArcCtx.snapshot.get(b.id).points);
-                    return sortAxis === 'x' ? ac.x - bc.x : ac.y - bc.y;
+                    return (ac.x * tangent.x + ac.y * tangent.y)
+                         - (bc.x * tangent.x + bc.y * tangent.y);
                 })
                 : baseAreas;
 
