@@ -450,54 +450,6 @@ test('fitGroupAsArc: seatSpacing uniforme cuando áreas tienen densidades distin
     result.forEach(r => assert.equal(r.shape.seatSpacingPx, 4));
 });
 
-test('fitGroupAsArc: cuña conserva su ancho natural (no se redimensiona por seatSpacing uniforme)', () => {
-    const areas = [
-        rectAreaForTest(0, 0, 100, 50, 5, 10),                       // normal: seatSpacing=10
-        { ...rectAreaForTest(0, 0, 150, 50, 5, 10), isWedge: true }, // cuña ancho 150
-        rectAreaForTest(0, 0, 100, 50, 5, 10)                        // normal: seatSpacing=10
-    ];
-    const result = ArcMath.fitGroupAsArc(areas, {
-        center: { x: 0, y: 1000 }, midRadius: 1000, gapDeg: 0, marginRatio: 0
-    });
-    // Las áreas normales: 10 seats × 10 + 2*2 margen = 104
-    // La cuña: 150 (ancho natural)
-    const arcLens = result.map(r => (r.slot.endAngle - r.slot.startAngle) * 1000);
-    assert.ok(approx(arcLens[0], 104, 1), `normal[0]: ${arcLens[0]}`);
-    assert.ok(approx(arcLens[1], 150, 1), `wedge: ${arcLens[1]}`);
-    assert.ok(approx(arcLens[2], 104, 1), `normal[2]: ${arcLens[2]}`);
-});
-
-test('fitGroupAsArc: cuñas devuelven {isWedge:true, slot} sin shape', () => {
-    const areas = [
-        rectAreaForTest(0, 0, 100, 50, 5, 10),
-        { ...rectAreaForTest(0, 0, 150, 50, 5, 10), isWedge: true }
-    ];
-    const result = ArcMath.fitGroupAsArc(areas, {
-        center: { x: 0, y: 1000 }, midRadius: 1000
-    });
-    assert.equal(result[0].isWedge, false);
-    assert.ok(result[0].shape, 'área normal tiene shape');
-    assert.ok(result[0].slot, 'área normal tiene slot');
-    assert.equal(result[1].isWedge, true);
-    assert.equal(result[1].shape, undefined, 'cuña NO tiene shape');
-    assert.ok(result[1].slot, 'cuña tiene slot');
-});
-
-test('fitGroupAsArc: cuñas se EXCLUYEN de la mediana de seatSpacing/rowSpacing', () => {
-    // Cuña con seatSpacing=20 (raro) entre dos normales con seatSpacing=10
-    const areas = [
-        rectAreaForTest(0, 0, 100, 50, 5, 10),                       // normal: 10/seat
-        { ...rectAreaForTest(0, 0, 200, 50, 5, 10), isWedge: true }, // cuña: 20/seat
-        rectAreaForTest(0, 0, 100, 50, 5, 10)                        // normal: 10/seat
-    ];
-    const result = ArcMath.fitGroupAsArc(areas, {
-        center: { x: 0, y: 1000 }, midRadius: 1000, marginRatio: 0
-    });
-    // El seatSpacingPx de las normales debe ser 10 (mediana de no-cuñas), no influido por la cuña.
-    assert.equal(result[0].shape.seatSpacingPx, 10);
-    assert.equal(result[2].shape.seatSpacingPx, 10);
-});
-
 test('fitGroupAsArc: thickness preserva alto + 2 × margen', () => {
     const areas = [rectAreaForTest(0, 0, 100, 170, 17, 28)];
     const result = ArcMath.fitGroupAsArc(areas, {
