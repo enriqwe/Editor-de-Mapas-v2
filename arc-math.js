@@ -541,7 +541,8 @@
             center, midRadius,
             gapDeg = 0, gapPx = 0,
             orientationRad = -Math.PI / 2,
-            marginRatio = 0.15,
+            marginRatio = 0.30,
+            marginMinPx = 2,
             // Si se pasan, fuerzan el paso de celda en lugar de calcularlo desde la
             // mediana del grupo. Útil para mantener el tamaño de asiento constante
             // entre arcos distintos del mismo mapa.
@@ -567,7 +568,7 @@
         const seatSpacing = (forceSeatSpacing > 0) ? forceSeatSpacing : median(stats.map(s => s.seatSpacing));
         const rowSpacing = (forceRowSpacing > 0) ? forceRowSpacing : median(stats.map(s => s.rowSpacing));
         const maxRows = Math.max(...stats.map(s => s.nRows));
-        const marginPx = Math.max(2, seatSpacing * marginRatio);
+        const marginPx = Math.max(marginMinPx, seatSpacing * marginRatio);
 
         const thickness = maxRows * rowSpacing + 2 * marginPx;
         const innerR = Math.max(1, midRadius - thickness / 2);

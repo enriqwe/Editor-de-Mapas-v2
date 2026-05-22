@@ -681,7 +681,10 @@
             }
         };
 
-        const GRID_STEP = 10; 
+        const GRID_STEP = 10;
+        // Margen entre el borde del área y el bloque de asientos. Se aplica al
+        // ajustar tamaño (seat editor) y a fitGroupAsArc (via marginRatio).
+        const AREA_INNER_MARGIN_PX = 6; 
         let isDrawingSeats = false;
         let drawingMode = true;
 
@@ -2520,7 +2523,8 @@
                 gapPx: (gapPx >= 0) ? gapPx : 4,
                 orientationRad,
                 forceSeatSpacing: AppState.globalSeatSpacing,
-                forceRowSpacing: AppState.globalRowSpacing
+                forceRowSpacing: AppState.globalRowSpacing,
+                marginMinPx: AREA_INNER_MARGIN_PX
             });
             const byId = new Map(result.map(r => [r.id, r.shape]));
             sel.forEach(area => {
@@ -4121,12 +4125,17 @@
 
             if (cols <= 0 || rows <= 0) return;
 
-            const targetWidth = cols * GRID_STEP;
-            const targetHeight = rows * GRID_STEP;
+            // El polígono se hace LIGERAMENTE más grande que el bloque de asientos
+            // para que haya un margen visible entre el borde del área y los asientos.
+            const M = AREA_INNER_MARGIN_PX;
+            const seatBlockW = cols * GRID_STEP;
+            const seatBlockH = rows * GRID_STEP;
+            const targetWidth = seatBlockW + 2 * M;
+            const targetHeight = seatBlockH + 2 * M;
 
-            const p0 = area.points[0]; 
-            const p1 = area.points[1]; 
-            const p3 = area.points[3]; 
+            const p0 = area.points[0];
+            const p1 = area.points[1];
+            const p3 = area.points[3];
 
             const dx1 = p1.x - p0.x;
             const dy1 = p1.y - p0.y;
@@ -4140,20 +4149,29 @@
 
             const ux1 = dx1 / len1;
             const uy1 = dy1 / len1;
-            
+
             const ux3 = dx3 / len3;
             const uy3 = dy3 / len3;
 
             const newP1 = { x: p0.x + ux1 * targetWidth, y: p0.y + uy1 * targetWidth };
             const newP3 = { x: p0.x + ux3 * targetHeight, y: p0.y + uy3 * targetHeight };
-            
-            const newP2 = { 
-                x: newP1.x + newP3.x - p0.x, 
-                y: newP1.y + newP3.y - p0.y 
+
+            const newP2 = {
+                x: newP1.x + newP3.x - p0.x,
+                y: newP1.y + newP3.y - p0.y
             };
 
             area.points = [p0, newP1, newP2, newP3];
-            
+
+            // Posicionar el seatGrid para que los asientos queden centrados con el margen.
+            area.seatGrid = {
+                origin: { x: p0.x + ux1 * M + ux3 * M, y: p0.y + uy1 * M + uy3 * M },
+                seatAxis: { x: ux1, y: uy1 },
+                rowAxis: { x: ux3, y: uy3 },
+                seatSpacing: GRID_STEP,
+                rowSpacing: GRID_STEP
+            };
+
             // Actualizar si estaba agrupada
             if (area.groupId && AppState.groups[area.groupId]) {
                 AppState.groups[area.groupId].originalPointsMap[area.id] = area.points;
