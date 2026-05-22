@@ -43,6 +43,10 @@
         .area-polygon.multi-selected {
             stroke: #2563eb !important; stroke-width: 3px !important; stroke-dasharray: 4,4;
         }
+        .area-polygon.arc-ref-highlight {
+            stroke: #facc15 !important; stroke-width: 4px !important; stroke-dasharray: none;
+            filter: drop-shadow(0px 0px 6px rgba(250,204,21,0.7));
+        }
         .area-label {
             font-family: sans-serif; font-weight: bold; font-size: 14px; fill: #1f2937;
             pointer-events: none; text-shadow: 0px 1px 2px rgba(255,255,255,0.8);
@@ -1775,7 +1779,8 @@
                     poly.setAttribute("points", area.points.map(p => `${p.x},${p.y}`).join(" "));
                 }
                 poly.setAttribute("style", `fill: ${colors.fill}; stroke: ${colors.stroke};`);
-                poly.className.baseVal = `area-polygon ${isSelected ? (AppState.selectedAreaIds.length > 1 && !isIsolated ? "multi-selected" : "selected") : ""}`;
+                const isArcRef = _fitArcCtx && _fitArcCtx.lockedRefGroupId && area.groupId === _fitArcCtx.lockedRefGroupId;
+                poly.className.baseVal = `area-polygon ${isSelected ? (AppState.selectedAreaIds.length > 1 && !isIsolated ? "multi-selected" : "selected") : ""}${isArcRef ? " arc-ref-highlight" : ""}`;
 
                 poly.addEventListener('mousedown', (e) => {
                     if (AppState.curveAlignment && AppState.curveAlignment.active) return;
@@ -1999,9 +2004,46 @@
                     rl.className.baseVal = "rotate-handle-line";
                     controlsLayer.appendChild(rl);
                     const rc = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-                    rc.setAttribute("cx", gx); 
-                    rc.setAttribute("cy", gy - groupBounds.height/2 - 40); 
+                    rc.setAttribute("cx", gx);
+                    rc.setAttribute("cy", gy - groupBounds.height/2 - 40);
                     rc.setAttribute("r", 8);
+                    rc.className.baseVal = "group-rotate-handle";
+                    rc.addEventListener('mousedown', (e) => startRotateArea(e, null));
+                    controlsLayer.appendChild(rc);
+                }
+            }
+
+            // Handle de rotación para arc groups: pivote en el CENTRO del arco. Aparece
+            // cuando hay un grupo activo cuyas áreas son todas arcos con el mismo centro.
+            if (AppState.activeGroupId && AppState.selectedAreaIds.length >= 1 && (!AppState.curveAlignment || !AppState.curveAlignment.active) && !_fitArcCtx) {
+                const groupAreas = AppState.selectedAreaIds.map(id => AppState.areas.find(a => a.id === id)).filter(Boolean);
+                const firstArc = groupAreas.find(a => isArc(a));
+                const allArcSameCenter = firstArc && groupAreas.every(a => isArc(a)
+                    && Math.abs(a.shape.center.x - firstArc.shape.center.x) < 0.5
+                    && Math.abs(a.shape.center.y - firstArc.shape.center.y) < 0.5);
+                if (allArcSameCenter) {
+                    // Rango angular del grupo
+                    let aMin = Infinity, aMax = -Infinity;
+                    groupAreas.forEach(a => {
+                        if (a.shape.startAngle < aMin) aMin = a.shape.startAngle;
+                        if (a.shape.endAngle > aMax) aMax = a.shape.endAngle;
+                    });
+                    const midAngle = (aMin + aMax) / 2;
+                    const c = firstArc.shape.center;
+                    const handleR = firstArc.shape.outerR + 35;
+                    const hx = c.x + handleR * Math.cos(midAngle);
+                    const hy = c.y + handleR * Math.sin(midAngle);
+                    // Línea radial entre la arc y el handle
+                    const innerHx = c.x + (firstArc.shape.outerR + 4) * Math.cos(midAngle);
+                    const innerHy = c.y + (firstArc.shape.outerR + 4) * Math.sin(midAngle);
+                    const rl = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    rl.setAttribute("x1", innerHx); rl.setAttribute("y1", innerHy);
+                    rl.setAttribute("x2", hx); rl.setAttribute("y2", hy);
+                    rl.className.baseVal = "rotate-handle-line";
+                    controlsLayer.appendChild(rl);
+                    const rc = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                    rc.setAttribute("cx", hx); rc.setAttribute("cy", hy);
+                    rc.setAttribute("r", 9);
                     rc.className.baseVal = "group-rotate-handle";
                     rc.addEventListener('mousedown', (e) => startRotateArea(e, null));
                     controlsLayer.appendChild(rc);
@@ -2235,7 +2277,15 @@
             arcGroups.forEach((a, gid) => {
                 const opt = document.createElement('option');
                 opt.value = gid;
-                opt.textContent = `Arco ${gid.replace(/^arc-/, '').slice(0, 6)} (centro ${Math.round(a.shape.center.x)},${Math.round(a.shape.center.y)})`;
+                // Listamos los códigos/títulos de las áreas del grupo para que sea fácil identificarlo.
+                const groupAreas = AppState.areas.filter(x => x.groupId === gid);
+                const sample = groupAreas
+                    .map(x => x.code || x.title)
+                    .filter(Boolean)
+                    .slice(0, 4)
+                    .join(', ');
+                const extra = groupAreas.length > 4 ? ` … (+${groupAreas.length - 4})` : '';
+                opt.textContent = `${sample}${extra}`;
                 shareSelect.appendChild(opt);
             });
             shareSelect.value = '';
@@ -2270,6 +2320,7 @@
             document.getElementById('fit-arc-curvature').value = Math.round(pct);
             document.getElementById('fit-arc-curvature-val').innerText = Math.round(pct);
             applyFitArcPreview();
+            renderMap();
         }
 
         /**
@@ -2627,7 +2678,22 @@
             saveStateToHistory();
             AppState.interactionMode = 'rotate_area';
             AppState.activeAreaId = area ? area.id : null;
-            if (area && AppState.selectedAreaIds.length <= 1) {
+
+            // Si todas las áreas seleccionadas son arcos del mismo centro, el pivote
+            // de rotación es el CENTRO del arco (no el centroide de la selección).
+            const firstArea = AppState.selectedAreaIds.length > 0
+                ? AppState.areas.find(a => a.id === AppState.selectedAreaIds[0])
+                : null;
+            const allShareArcCenter = firstArea && isArc(firstArea) &&
+                AppState.selectedAreaIds.every(id => {
+                    const a = AppState.areas.find(ar => ar.id === id);
+                    return a && isArc(a)
+                        && Math.abs(a.shape.center.x - firstArea.shape.center.x) < 0.5
+                        && Math.abs(a.shape.center.y - firstArea.shape.center.y) < 0.5;
+                });
+            if (allShareArcCenter) {
+                AppState.initialCenter = { x: firstArea.shape.center.x, y: firstArea.shape.center.y };
+            } else if (area && AppState.selectedAreaIds.length <= 1) {
                 AppState.initialCenter = getCentroid(area.points);
             } else {
                 const groupBounds = getSelectionBounds();
@@ -2635,11 +2701,13 @@
             }
             AppState.initialPointsMap = {};
             AppState.initialSeatGridMap = {};
+            AppState.initialArcShapesMap = {};
             AppState.selectedAreaIds.forEach(id => {
                 const a = AppState.areas.find(ar => ar.id === id);
                 if (a) {
                     AppState.initialPointsMap[id] = JSON.parse(JSON.stringify(a.points));
                     if (a.seatGrid) AppState.initialSeatGridMap[id] = JSON.parse(JSON.stringify(a.seatGrid));
+                    if (isArc(a)) AppState.initialArcShapesMap[id] = JSON.parse(JSON.stringify(a.shape));
                 }
             });
             const m = getMousePos(e);
@@ -2853,14 +2921,26 @@
                 const cy = AppState.initialCenter.y;
                 AppState.selectedAreaIds.forEach(id => {
                     const a = AppState.areas.find(ar => ar.id === id);
-                    if (a && AppState.initialPointsMap[id]) {
+                    if (!a) return;
+                    if (isArc(a) && AppState.initialArcShapesMap && AppState.initialArcShapesMap[id]) {
+                        // Rotación de arc: rota center alrededor del pivote y desplaza startAngle/endAngle.
+                        const init = AppState.initialArcShapesMap[id];
+                        const newCx = cx + (init.center.x - cx) * cos - (init.center.y - cy) * sin;
+                        const newCy = cy + (init.center.x - cx) * sin + (init.center.y - cy) * cos;
+                        a.shape = {
+                            ...init,
+                            center: { x: newCx, y: newCy },
+                            startAngle: init.startAngle + deltaAngle,
+                            endAngle: init.endAngle + deltaAngle
+                        };
+                        syncArcPoints(a);
+                    } else if (AppState.initialPointsMap[id]) {
                         a.points = AppState.initialPointsMap[id].map(p => ({
                             x: cx + (p.x - cx) * cos - (p.y - cy) * sin,
                             y: cy + (p.x - cx) * sin + (p.y - cy) * cos
                         }));
                     }
-                    // Rotar también el seatGrid para que los asientos giren con el área.
-                    if (a && AppState.initialSeatGridMap && AppState.initialSeatGridMap[id]) {
+                    if (a.seatGrid && AppState.initialSeatGridMap && AppState.initialSeatGridMap[id]) {
                         a.seatGrid = ArcMath.rotateSeatGrid(AppState.initialSeatGridMap[id], cx, cy, deltaAngle);
                     }
                 });
