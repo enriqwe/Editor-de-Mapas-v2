@@ -1856,32 +1856,34 @@
                 g.appendChild(txt);
 
                 if (!isArc(area)) {
-                    // Front edge: si hay seatGrid, lo derivamos de él (rowAxis = hacia el campo).
-                    // Así el frente se mantiene correcto aunque el polígono se haya recalculado
-                    // (p.ej. tras "Ajustar tamaño") y el orden de los vértices ya no sea
-                    // [top-left, top-right, bottom-right, bottom-left] tradicional.
-                    let p3l, p4l, frontX, frontY;
+                    // Dirección "hacia el campo" (rowAxis si hay seatGrid; si no, perpendicular
+                    // al edge points[2]-points[3] como fallback legacy).
+                    let frontX, frontY;
                     if (area.seatGrid && area.seatGrid.rowAxis) {
-                        const sg = area.seatGrid;
-                        const nSeats = (area.seatMax - area.seatMin + 1) || 1;
-                        const nRows = (area.rowMax - area.rowMin + 1) || 1;
-                        const frontOff = nRows * sg.rowSpacing;
-                        const widthOff = nSeats * sg.seatSpacing;
-                        p4l = {
-                            x: sg.origin.x + frontOff * sg.rowAxis.x,
-                            y: sg.origin.y + frontOff * sg.rowAxis.y
-                        };
-                        p3l = {
-                            x: p4l.x + widthOff * sg.seatAxis.x,
-                            y: p4l.y + widthOff * sg.seatAxis.y
-                        };
-                        frontX = sg.rowAxis.x;
-                        frontY = sg.rowAxis.y;
-                    } else {
-                        p3l = area.points[2]; p4l = area.points[3];
-                        const dx = p3l.x - p4l.x, dy = p3l.y - p4l.y, l = Math.sqrt(dx*dx + dy*dy);
-                        frontX = -dy / l; frontY = dx / l;
+                        frontX = area.seatGrid.rowAxis.x;
+                        frontY = area.seatGrid.rowAxis.y;
+                    } else if (area.points.length >= 4) {
+                        const p2 = area.points[2], p3 = area.points[3];
+                        const dxh = p2.x - p3.x, dyh = p2.y - p3.y, lh = Math.hypot(dxh, dyh) || 1;
+                        frontX = -dyh / lh; frontY = dxh / lh;
+                    } else { frontX = 0; frontY = 1; }
+
+                    // Buscamos el EDGE del polígono cuyo punto medio tiene la proyección
+                    // máxima en frontDir. Ese es el lado más "delantero" → la línea queda
+                    // SIEMPRE sobre la silueta del área, no flotando fuera de ella.
+                    let bestProj = -Infinity, bestI = 0;
+                    if (area.points.length >= 2) {
+                        for (let i = 0; i < area.points.length; i++) {
+                            const j = (i + 1) % area.points.length;
+                            const mx = (area.points[i].x + area.points[j].x) / 2;
+                            const my = (area.points[i].y + area.points[j].y) / 2;
+                            const proj = mx * frontX + my * frontY;
+                            if (proj > bestProj) { bestProj = proj; bestI = i; }
+                        }
                     }
+                    const p4l = area.points[bestI] || { x: 0, y: 0 };
+                    const p3l = area.points[(bestI + 1) % area.points.length] || p4l;
+
                     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
                     line.setAttribute("class", "front-edge");
                     line.setAttribute("x1", p4l.x); line.setAttribute("y1", p4l.y);
