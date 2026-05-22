@@ -541,7 +541,12 @@
             center, midRadius,
             gapDeg = 0, gapPx = 0,
             orientationRad = -Math.PI / 2,
-            marginRatio = 0.15
+            marginRatio = 0.15,
+            // Si se pasan, fuerzan el paso de celda en lugar de calcularlo desde la
+            // mediana del grupo. Útil para mantener el tamaño de asiento constante
+            // entre arcos distintos del mismo mapa.
+            forceSeatSpacing,
+            forceRowSpacing
         } = opts;
         if (!Array.isArray(areas) || areas.length === 0) throw new Error('fitGroupAsArc: areas vacío');
         if (!(midRadius > 0)) throw new Error('fitGroupAsArc: midRadius > 0');
@@ -557,9 +562,10 @@
             };
         });
 
-        // Paso de celda UNIFORME para todo el grupo (mediana de los pasos naturales).
-        const seatSpacing = median(stats.map(s => s.seatSpacing));
-        const rowSpacing = median(stats.map(s => s.rowSpacing));
+        // Paso de celda UNIFORME. Si se pasa un valor forzado (p. ej. el global del mapa),
+        // se usa ese; si no, la mediana del grupo.
+        const seatSpacing = (forceSeatSpacing > 0) ? forceSeatSpacing : median(stats.map(s => s.seatSpacing));
+        const rowSpacing = (forceRowSpacing > 0) ? forceRowSpacing : median(stats.map(s => s.rowSpacing));
         const maxRows = Math.max(...stats.map(s => s.nRows));
         const marginPx = Math.max(2, seatSpacing * marginRatio);
 
@@ -606,23 +612,33 @@
      * Usado cuando la curvatura es 100% (recta perfecta).
      */
     function layAreasFlat(areas, opts) {
-        const { center, directionRad = 0, gapPx = 4 } = opts;
+        const { center, directionRad = 0, gapPx = 4, forceSeatSpacing, forceRowSpacing } = opts;
         if (!Array.isArray(areas) || areas.length === 0) throw new Error('layAreasFlat: areas vacío');
         const stats = areas.map(a => {
             const sz = computeAreaNaturalSize(a);
             const nRows = (a.rowMax - a.rowMin + 1) || 1;
-            return { naturalWidth: sz.width, rowSpacing: sz.height / nRows, nRows };
+            const nSeats = (a.seatMax - a.seatMin + 1) || 1;
+            return {
+                naturalWidth: sz.width,
+                seatSpacing: sz.width / nSeats,
+                rowSpacing: sz.height / nRows,
+                nRows, nSeats
+            };
         });
-        const rowSpacing = median(stats.map(s => s.rowSpacing));
+        // Si se pasan globales forzados, sobrescriben los naturales para que el ancho de
+        // cada área se calcule como nSeats × paso global (consistencia entre arcos).
+        const rowSpacing = (forceRowSpacing > 0) ? forceRowSpacing : median(stats.map(s => s.rowSpacing));
+        const seatSpacing = (forceSeatSpacing > 0) ? forceSeatSpacing : null;
         const maxRows = Math.max(...stats.map(s => s.nRows));
         const H = maxRows * rowSpacing;
-        const totalW = stats.reduce((s, x) => s + x.naturalWidth, 0) + (areas.length - 1) * gapPx;
+        const widths = stats.map(s => seatSpacing ? s.nSeats * seatSpacing : s.naturalWidth);
+        const totalW = widths.reduce((acc, w) => acc + w, 0) + (areas.length - 1) * gapPx;
         const dirX = Math.cos(directionRad), dirY = Math.sin(directionRad);
         const perpX = -dirY, perpY = dirX; // perpendicular "hacia atrás" (rowMax)
         const halfH = H / 2;
         let cursor = -totalW / 2;
         return areas.map((a, i) => {
-            const w = stats[i].naturalWidth;
+            const w = widths[i];
             const su = cursor, eu = cursor + w;
             // Convención polygon: p0 top-left, p1 top-right, p2 bottom-right, p3 bottom-left.
             // "top" = rowMax (lejos del campo), "bottom" = rowMin (cerca del campo).

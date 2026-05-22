@@ -214,6 +214,26 @@
                     </div>
                 </div>
 
+                <!-- Tamaño de celda GLOBAL del mapa: usado por TODO "Acoplar a arco". -->
+                <details class="mb-3 text-xs border border-gray-200 rounded bg-gray-50">
+                    <summary class="cursor-pointer px-2 py-1.5 font-bold text-gray-600 flex items-center gap-1">
+                        <i data-lucide="ruler" class="w-3.5 h-3.5"></i> Tamaño global de celda
+                    </summary>
+                    <div class="p-2 space-y-2 border-t border-gray-200">
+                        <div class="text-[10px] text-gray-500">Aplica a todos los acoplar-a-arco para mantener el mismo tamaño de asiento en todo el mapa.</div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-[10px] font-medium text-gray-500">Asiento (px)</label>
+                                <input type="number" id="prop-global-seat" step="0.1" min="1" class="w-full mt-0.5 border-gray-300 rounded border p-1 text-xs" onchange="updateGlobalSeatSize()">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-medium text-gray-500">Fila (px)</label>
+                                <input type="number" id="prop-global-row" step="0.1" min="1" class="w-full mt-0.5 border-gray-300 rounded border p-1 text-xs" onchange="updateGlobalSeatSize()">
+                            </div>
+                        </div>
+                    </div>
+                </details>
+
                 <div id="multi-selection-info" class="hidden text-sm p-4 bg-blue-50 text-blue-800 rounded border border-blue-200 text-center">
                     <span class="font-bold block text-lg mb-1" id="multi-count">0</span> Áreas seleccionadas
                     <button onclick="openFitToArcPanel()" class="mt-3 w-full bg-pink-600 text-white py-1.5 rounded text-xs font-bold hover:bg-pink-700 shadow-sm flex items-center justify-center gap-1">
@@ -621,6 +641,11 @@
             areaCounter: 0,
             sectorCounter: 0,
             seatCounter: 0,
+            // Tamaño de celda GLOBAL del mapa (px). Auto-inicializado tras importar CSV
+            // como la mediana de todas las áreas. Todas las operaciones de acoplar a arco
+            // lo respetan para que los asientos tengan el mismo tamaño en TODO el estadio.
+            globalSeatSpacing: null,
+            globalRowSpacing: null,
             
             curveAlignment: {
                 active: false,
@@ -922,6 +947,21 @@
             updateActiveGroup();
             renderMap();
             updateUI();
+        }
+
+        function updateGlobalSeatSize() {
+            const s = parseFloat(document.getElementById('prop-global-seat').value);
+            const r = parseFloat(document.getElementById('prop-global-row').value);
+            if (s > 0) AppState.globalSeatSpacing = s;
+            if (r > 0) AppState.globalRowSpacing = r;
+        }
+
+        function populateGlobalSeatSize() {
+            const sEl = document.getElementById('prop-global-seat');
+            const rEl = document.getElementById('prop-global-row');
+            if (!sEl || !rEl) return;
+            if (AppState.globalSeatSpacing != null) sEl.value = Math.round(AppState.globalSeatSpacing * 10) / 10;
+            if (AppState.globalRowSpacing != null) rEl.value = Math.round(AppState.globalRowSpacing * 10) / 10;
         }
 
         function rederiveSeatGrid() {
@@ -1410,9 +1450,29 @@
                 });
                 
                 if (sectorAreas.length > 0) {
-                    currentY += maxSectorHeight + 80; 
+                    currentY += maxSectorHeight + 80;
                 }
             });
+
+            // Auto-inicializa el tamaño de celda global (mediana de todas las áreas
+            // recién cargadas) para que los próximos acoplar-a-arco lo respeten.
+            if (AppState.globalSeatSpacing == null || AppState.globalRowSpacing == null) {
+                const seatSpacings = [], rowSpacings = [];
+                AppState.areas.forEach(a => {
+                    if (!a.points || a.points.length < 4) return;
+                    const sz = ArcMath.computeAreaNaturalSize(a);
+                    const nRows = (a.rowMax - a.rowMin + 1) || 1;
+                    const nSeats = (a.seatMax - a.seatMin + 1) || 1;
+                    if (sz.width > 0) seatSpacings.push(sz.width / nSeats);
+                    if (sz.height > 0) rowSpacings.push(sz.height / nRows);
+                });
+                if (seatSpacings.length > 0) {
+                    seatSpacings.sort((a, b) => a - b);
+                    rowSpacings.sort((a, b) => a - b);
+                    AppState.globalSeatSpacing = seatSpacings[Math.floor(seatSpacings.length / 2)];
+                    AppState.globalRowSpacing = rowSpacings[Math.floor(rowSpacings.length / 2)];
+                }
+            }
 
             renderMap(); renderTreeList(); updateUI(); resetZoom();
         }
@@ -2186,7 +2246,9 @@
                 const layout = ArcMath.layAreasFlat(ordered, {
                     center: _fitArcCtx.selCenter,
                     directionRad,
-                    gapPx: 4
+                    gapPx: 4,
+                    forceSeatSpacing: AppState.globalSeatSpacing,
+                    forceRowSpacing: AppState.globalRowSpacing
                 });
                 const byId = new Map(layout.map(r => [r.id, r.points]));
                 sel.forEach(area => {
@@ -2221,7 +2283,9 @@
                 center: { x: adjCx, y: adjCy },
                 midRadius,
                 gapPx: 4,
-                orientationRad
+                orientationRad,
+                forceSeatSpacing: AppState.globalSeatSpacing,
+                forceRowSpacing: AppState.globalRowSpacing
             });
             const byId = new Map(result.map(r => [r.id, r.shape]));
             sel.forEach(area => {
@@ -2853,6 +2917,7 @@
 
         function updateUI() {
             renderTreeList();
+            populateGlobalSeatSize();
             const areaForm = document.getElementById('area-form'), 
                   sectorForm = document.getElementById('sector-form'), 
                   noSel = document.getElementById('no-selection'), 

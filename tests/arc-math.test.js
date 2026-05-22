@@ -450,6 +450,38 @@ test('fitGroupAsArc: seatSpacing uniforme cuando áreas tienen densidades distin
     result.forEach(r => assert.equal(r.shape.seatSpacingPx, 4));
 });
 
+test('fitGroupAsArc: forceSeatSpacing/forceRowSpacing imponen el paso de celda global', () => {
+    // Áreas con paso natural distinto entre sí; al forzar 8x10, todos los shapes
+    // deben usar 8 (asiento) y 10 (fila) como su seatSpacingPx/rowSpacingPx.
+    const areas = [
+        rectAreaForTest(0, 0, 100, 50, 5, 10),   // natural seat=10, row=10
+        rectAreaForTest(0, 0, 200, 80, 8, 20),   // natural seat=10, row=10 (mismas dimensiones rel.)
+        rectAreaForTest(0, 0, 60, 30, 3, 6)      // natural seat=10, row=10
+    ];
+    const result = ArcMath.fitGroupAsArc(areas, {
+        center: { x: 0, y: 2000 }, midRadius: 2000,
+        forceSeatSpacing: 8, forceRowSpacing: 12, marginRatio: 0
+    });
+    result.forEach(r => {
+        assert.equal(r.shape.seatSpacingPx, 8);
+        assert.equal(r.shape.rowSpacingPx, 12);
+    });
+});
+
+test('layAreasFlat: forceSeatSpacing escala los anchos por nSeats × paso global', () => {
+    const areas = [
+        rectAreaForTest(0, 0, 100, 50, 5, 10),  // 10 seats
+        rectAreaForTest(0, 0, 100, 50, 5, 20)   // 20 seats
+    ];
+    const result = ArcMath.layAreasFlat(areas, {
+        center: { x: 0, y: 0 }, directionRad: 0, gapPx: 0, forceSeatSpacing: 8
+    });
+    const w0 = result[0].points[1].x - result[0].points[0].x;
+    const w1 = result[1].points[1].x - result[1].points[0].x;
+    assert.ok(approx(w0, 10 * 8), `área 10 seats: ${w0} (esperado 80)`);
+    assert.ok(approx(w1, 20 * 8), `área 20 seats: ${w1} (esperado 160)`);
+});
+
 test('fitGroupAsArc: thickness preserva alto + 2 × margen', () => {
     const areas = [rectAreaForTest(0, 0, 100, 170, 17, 28)];
     const result = ArcMath.fitGroupAsArc(areas, {
