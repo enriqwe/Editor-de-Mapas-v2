@@ -1856,17 +1856,42 @@
                 g.appendChild(txt);
 
                 if (!isArc(area)) {
-                    const p3l = area.points[2], p4l = area.points[3];
+                    // Front edge: si hay seatGrid, lo derivamos de él (rowAxis = hacia el campo).
+                    // Así el frente se mantiene correcto aunque el polígono se haya recalculado
+                    // (p.ej. tras "Ajustar tamaño") y el orden de los vértices ya no sea
+                    // [top-left, top-right, bottom-right, bottom-left] tradicional.
+                    let p3l, p4l, frontX, frontY;
+                    if (area.seatGrid && area.seatGrid.rowAxis) {
+                        const sg = area.seatGrid;
+                        const nSeats = (area.seatMax - area.seatMin + 1) || 1;
+                        const nRows = (area.rowMax - area.rowMin + 1) || 1;
+                        const frontOff = nRows * sg.rowSpacing;
+                        const widthOff = nSeats * sg.seatSpacing;
+                        p4l = {
+                            x: sg.origin.x + frontOff * sg.rowAxis.x,
+                            y: sg.origin.y + frontOff * sg.rowAxis.y
+                        };
+                        p3l = {
+                            x: p4l.x + widthOff * sg.seatAxis.x,
+                            y: p4l.y + widthOff * sg.seatAxis.y
+                        };
+                        frontX = sg.rowAxis.x;
+                        frontY = sg.rowAxis.y;
+                    } else {
+                        p3l = area.points[2]; p4l = area.points[3];
+                        const dx = p3l.x - p4l.x, dy = p3l.y - p4l.y, l = Math.sqrt(dx*dx + dy*dy);
+                        frontX = -dy / l; frontY = dx / l;
+                    }
                     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                    line.setAttribute("class", "front-edge"); line.setAttribute("x1", p4l.x); line.setAttribute("y1", p4l.y); line.setAttribute("x2", p3l.x); line.setAttribute("y2", p3l.y);
+                    line.setAttribute("class", "front-edge");
+                    line.setAttribute("x1", p4l.x); line.setAttribute("y1", p4l.y);
+                    line.setAttribute("x2", p3l.x); line.setAttribute("y2", p3l.y);
                     g.appendChild(line);
-
-                    const mx = (p3l.x+p4l.x)/2, my = (p3l.y+p4l.y)/2, dx = p3l.x-p4l.x, dy = p3l.y-p4l.y, l = Math.sqrt(dx*dx+dy*dy);
-                    const nx = -dy/l, ny = dx/l;
+                    const mx = (p3l.x + p4l.x) / 2, my = (p3l.y + p4l.y) / 2;
                     const arrow = document.createElementNS("http://www.w3.org/2000/svg", "line");
                     arrow.setAttribute("class", "front-arrow");
                     arrow.setAttribute("x1", mx); arrow.setAttribute("y1", my);
-                    arrow.setAttribute("x2", mx+nx*18); arrow.setAttribute("y2", my+ny*18);
+                    arrow.setAttribute("x2", mx + frontX * 18); arrow.setAttribute("y2", my + frontY * 18);
                     arrow.setAttribute("stroke", "#ef4444");
                     arrow.setAttribute("stroke-width", "3");
                     arrow.setAttribute("marker-end", "url(#arrowhead)");
@@ -4169,7 +4194,10 @@
                         }
                     }
                 });
-                area.points = ArcMath.convexHull(points);
+                // Hull con simplificación: quita la "escalera" que produce el hull sobre
+                // la rejilla de celdas → un polígono limpio con 4–8 vértices típicamente.
+                const hull = ArcMath.convexHull(points);
+                area.points = ArcMath.simplifyPolygon(hull, AREA_INNER_MARGIN_PX);
             } else {
                 // Sin asientos: fallback al rectángulo de cols×GRID_STEP + 2M alrededor de p0.
                 const seatBlockW = cols * GRID_STEP;

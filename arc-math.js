@@ -421,6 +421,41 @@
     }
 
     /**
+     * Simplifica un polígono cerrado: elimina vértices cuya distancia perpendicular
+     * al segmento entre el vértice anterior y el siguiente sea menor que `tolerance`.
+     * Útil para quitar el "staircase" que produce el convex hull sobre rejillas de
+     * asientos: el resultado tiene mucho menos vértices y bordes rectos largos.
+     */
+    function simplifyPolygon(points, tolerance) {
+        tolerance = tolerance == null ? 5 : tolerance;
+        if (!Array.isArray(points) || points.length <= 3) return (points || []).slice();
+        let pts = [...points];
+        let changed = true;
+        while (changed && pts.length > 3) {
+            changed = false;
+            const next = [];
+            for (let i = 0; i < pts.length; i++) {
+                const A = pts[(i - 1 + pts.length) % pts.length];
+                const B = pts[i];
+                const C = pts[(i + 1) % pts.length];
+                const dx = C.x - A.x, dy = C.y - A.y;
+                const len = Math.hypot(dx, dy);
+                const perpDist = len < 1e-9
+                    ? Math.hypot(B.x - A.x, B.y - A.y)
+                    : Math.abs((B.x - A.x) * dy - (B.y - A.y) * dx) / len;
+                if (perpDist >= tolerance) {
+                    next.push(B);
+                } else {
+                    changed = true;
+                }
+            }
+            if (next.length < 3) break;
+            pts = next;
+        }
+        return pts;
+    }
+
+    /**
      * Devuelve el vector unitario que indica hacia dónde apunta el frente del
      * área (rowMin / fila más baja, hacia donde está el campo).
      *  - polígono: perpendicular al lado p2-p3 (mismo cálculo que el render
@@ -437,6 +472,12 @@
             const dy = sh.center.y - innerMidY;
             const l = Math.hypot(dx, dy) || 1;
             return { x: dx / l, y: dy / l };
+        }
+        // Para polígonos: si hay seatGrid, su rowAxis apunta de rowMax hacia rowMin
+        // (es decir, hacia el campo). Es la fuente fiable independiente del orden de
+        // los vértices del polígono (que puede cambiar tras un hull/simplify).
+        if (area && area.seatGrid && area.seatGrid.rowAxis) {
+            return { x: area.seatGrid.rowAxis.x, y: area.seatGrid.rowAxis.y };
         }
         const pts = area && area.points;
         if (!pts || pts.length < 4) return { x: 0, y: 1 };
@@ -778,7 +819,7 @@
         computeFrontDirection, averageFrontDirection,
         computeSeatGridFromPolygon, seatPosFromGrid,
         translateSeatGrid, rotateSeatGrid,
-        convexHull,
+        convexHull, simplifyPolygon,
         defaultArcShape, clampArcShape,
         angleFromPoint, radiusFromPoint,
         parseAreaShape, serializeAreaShape
