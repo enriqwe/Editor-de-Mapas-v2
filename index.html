@@ -3224,38 +3224,31 @@
         function resetZoom() { AppState.zoom = 1; AppState.panX = 0; AppState.panY = 0; updateTransform(); }
 
         /**
-         * Centra el viewport en el área indicada. Si el área no está visible (offscreen
-         * o muy pequeña al zoom actual), también ajusta el zoom para que se vea con un
-         * margen razonable.
+         * Si el área no está visible en el viewport actual, pan-ea hasta centrarla.
+         * NO cambia el zoom: respeta el nivel actual del usuario.
+         * Si ya está visible (con margen razonable), no hace nada.
          */
         function centerViewOnArea(area) {
             if (!area) return;
             const viewport = document.getElementById('main-viewport');
             const rect = viewport.getBoundingClientRect();
-            // Bounding box del área (en coords del mundo).
-            let cx, cy, w, h;
-            if (isArc(area)) {
-                const pts = ArcMath.arcOutlinePoints(area.shape, 24);
-                const b = getBounds(pts);
-                cx = (b.minX + b.maxX) / 2;
-                cy = (b.minY + b.maxY) / 2;
-                w = b.width; h = b.height;
-            } else {
-                const b = getBounds(area.points);
-                cx = (b.minX + b.maxX) / 2;
-                cy = (b.minY + b.maxY) / 2;
-                w = b.width; h = b.height;
-            }
-            // Si el área queda muy pequeña en el viewport al zoom actual, ajustamos
-            // para que ocupe ~50% del lado más corto. No subimos del zoom actual si
-            // ya era más amplio (preservamos la sensación del usuario al inspeccionar).
-            const margin = 1.4; // 40% de margen
-            const fitZoomX = rect.width / (w * margin);
-            const fitZoomY = rect.height / (h * margin);
-            const fitZoom = Math.max(0.1, Math.min(5, Math.min(fitZoomX, fitZoomY)));
-            const targetZoom = Math.max(AppState.zoom, Math.min(2, fitZoom));
-            AppState.zoom = targetZoom;
-            // Pan tal que (cx, cy) quede en el centro del viewport.
+            const pts = isArc(area)
+                ? ArcMath.arcOutlinePoints(area.shape, 24)
+                : area.points;
+            if (!pts || pts.length === 0) return;
+            const b = getBounds(pts);
+            const cx = (b.minX + b.maxX) / 2;
+            const cy = (b.minY + b.maxY) / 2;
+            // Bounding box del área en coords de viewport (px en pantalla).
+            const vMinX = b.minX * AppState.zoom + AppState.panX;
+            const vMaxX = b.maxX * AppState.zoom + AppState.panX;
+            const vMinY = b.minY * AppState.zoom + AppState.panY;
+            const vMaxY = b.maxY * AppState.zoom + AppState.panY;
+            const pad = 40; // margen interior: si la caja toca el borde a < 40 px, panea.
+            const fullyVisible = vMinX >= pad && vMaxX <= rect.width - pad
+                && vMinY >= pad && vMaxY <= rect.height - pad;
+            if (fullyVisible) return;
+            // Solo pan, mismo zoom. Centro del área → centro del viewport.
             AppState.panX = rect.width / 2 - cx * AppState.zoom;
             AppState.panY = rect.height / 2 - cy * AppState.zoom;
             updateTransform();
