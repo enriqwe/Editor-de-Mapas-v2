@@ -2406,11 +2406,11 @@
             });
             const refSpan = refMax - refMin;
             const refMidAngle = (refMin + refMax) / 2;
+            const refInnerR = refAreas[0].shape.innerR;
+            const refOuterR = refAreas[0].shape.outerR;
+            const refMidR = (refInnerR + refOuterR) / 2;
 
-            // Alinea la ORIENTACIÓN del nuevo arco con el midAngle del ref arc:
-            // mueve selCenter sobre el mismo radial (preservando su distancia al centro).
-            // Sin esto, totalSweep coincide pero los arcos quedan rotados → desencaja en
-            // los extremos.
+            // Alinea la orientación del nuevo arco al midAngle del ref.
             const refC = _fitArcCtx.lockedCenter;
             const oldSelC = _fitArcCtx.selCenter;
             const dist = Math.hypot(oldSelC.x - refC.x, oldSelC.y - refC.y) || 1;
@@ -2419,13 +2419,6 @@
                 y: refC.y + dist * Math.sin(refMidAngle)
             };
 
-            const pct = parseFloat(document.getElementById('fit-arc-curvature').value);
-            const midR = ArcMath.curvaturePctToMidRadius(pct, _fitArcCtx.totalArcLen);
-            if (!Number.isFinite(midR) || midR <= 0) return;
-            const arcLen = refSpan * midR;
-
-            // marginPx debe coincidir EXACTAMENTE con el cálculo interno de
-            // fitGroupAsArc para que el gap resultante encaje sin error.
             const sel = _fitArcCtx.selected;
             const seatSpacing = AppState.globalSeatSpacing
                 || (function () {
@@ -2435,19 +2428,37 @@
                     });
                     return sp.sort((a, b) => a - b)[Math.floor(sp.length / 2)] || 10;
                 })();
+            const rowSpacing = AppState.globalRowSpacing || 10;
             const marginPx = Math.max(AREA_INNER_MARGIN_PX, seatSpacing * 0.30);
+            const maxRows = Math.max(...sel.map(a => (a.rowMax - a.rowMin + 1) || 1));
+            const newThickness = maxRows * rowSpacing + 2 * marginPx;
 
+            // Encaja radialmente: si el nuevo arco está fuera, pegado al borde
+            // externo del ref con un pequeño hueco; si está dentro, pegado al
+            // interno. Así nunca se solapan y queda una continuación visual.
+            const RADIAL_GAP = 6;
+            const currentPct = parseFloat(document.getElementById('fit-arc-curvature').value);
+            const currentMidR = ArcMath.curvaturePctToMidRadius(currentPct, _fitArcCtx.totalArcLen);
+            let desiredMidR;
+            if (!Number.isFinite(currentMidR) || currentMidR >= refMidR) {
+                desiredMidR = refOuterR + newThickness / 2 + RADIAL_GAP;
+            } else {
+                desiredMidR = Math.max(newThickness / 2 + 1, refInnerR - newThickness / 2 - RADIAL_GAP);
+            }
+            const newPct = ArcMath.midRadiusToCurvaturePct(desiredMidR, _fitArcCtx.totalArcLen);
+            document.getElementById('fit-arc-curvature').value = Math.round(newPct);
+            document.getElementById('fit-arc-curvature-val').innerText = Math.round(newPct);
+
+            const arcLen = refSpan * desiredMidR;
             let totalWidth = 0;
             sel.forEach(a => {
                 const nSeats = (a.seatMax - a.seatMin + 1) || 1;
                 totalWidth += nSeats * seatSpacing + 2 * marginPx;
             });
-
             const N = sel.length;
-            if (N < 2) return;
+            if (N < 2) { applyFitArcPreview(); return; }
             const gap = (arcLen - totalWidth) / (N - 1);
-            const gapClamped = Math.max(0, gap);
-            document.getElementById('fit-arc-gap').value = Math.round(gapClamped * 10) / 10;
+            document.getElementById('fit-arc-gap').value = Math.round(Math.max(0, gap) * 10) / 10;
             applyFitArcPreview();
         }
 
