@@ -284,6 +284,13 @@
                             <input type="number" id="prop-bg-h" class="w-full mt-1 border-purple-200 rounded-md shadow-sm border p-1 text-xs" oninput="updateBgFromForm()">
                         </div>
                     </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-purple-600 uppercase">Rotación (°)</label>
+                        <div class="flex gap-2 items-center mt-1">
+                            <input type="range" id="prop-bg-rot-range" min="-180" max="180" step="1" value="0" class="flex-1" oninput="document.getElementById('prop-bg-rot').value = this.value; updateBgFromForm();">
+                            <input type="number" id="prop-bg-rot" value="0" step="1" class="w-16 border-purple-200 rounded-md shadow-sm border p-1 text-xs" oninput="document.getElementById('prop-bg-rot-range').value = this.value; updateBgFromForm();">
+                        </div>
+                    </div>
                     <div class="pt-2 flex gap-2">
                         <button onclick="AppState.background.selected = false; updateUI(); renderMap();" class="flex-1 bg-white border border-purple-200 text-purple-700 py-1 px-2 rounded hover:bg-purple-100 text-xs font-bold transition-colors">Deseleccionar</button>
                         <button onclick="AppState.background.url = null; AppState.background.selected = false; updateUI(); renderMap();" class="bg-red-50 text-red-600 p-1 rounded hover:bg-red-100 transition-colors border border-red-200" title="Eliminar Imagen"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
@@ -633,7 +640,7 @@
             sectors: [{ id: 'default-sec', title: 'Sector General' }], 
             areas: [], 
             groups: {}, // { [groupId]: { id, type: 'curve', p0, p1, p2, originalPointsMap, orderedIds } }
-            background: { url: null, x: 0, y: 0, w: 0, h: 0, locked: true, selected: false },
+            background: { url: null, x: 0, y: 0, w: 0, h: 0, rotation: 0, locked: true, selected: false },
             zoom: 1, 
             selectedAreaIds: [], 
             selectedSectorId: null, 
@@ -1660,53 +1667,74 @@
             oldClips.forEach(c => c.remove());
 
             if (AppState.background.url) {
+                const bg = AppState.background;
+                const cx = bg.x + bg.w / 2;
+                const cy = bg.y + bg.h / 2;
+                const rot = bg.rotation || 0;
+                const rotAttr = rot ? `rotate(${rot} ${cx} ${cy})` : '';
+
+                const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                if (rotAttr) group.setAttribute("transform", rotAttr);
+
                 const img = document.createElementNS("http://www.w3.org/2000/svg", "image");
-                img.setAttribute("href", AppState.background.url);
-                img.setAttribute("x", AppState.background.x); 
-                img.setAttribute("y", AppState.background.y);
-                img.setAttribute("width", AppState.background.w); 
-                img.setAttribute("height", AppState.background.h);
-                
+                img.setAttribute("href", bg.url);
+                img.setAttribute("x", bg.x);
+                img.setAttribute("y", bg.y);
+                img.setAttribute("width", bg.w);
+                img.setAttribute("height", bg.h);
                 img.setAttribute("draggable", "false");
                 img.style.userSelect = "none";
-                
+
                 const isDrawingCurve = AppState.curveAlignment && AppState.curveAlignment.active;
-                
-                if (!AppState.background.locked && !isDrawingCurve) {
+                if (!bg.locked && !isDrawingCurve) {
                     img.addEventListener('mousedown', startMoveBackground);
-                    
-                    if (AppState.background.selected) {
-                        const frame = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-                        frame.setAttribute("x", AppState.background.x);
-                        frame.setAttribute("y", AppState.background.y);
-                        frame.setAttribute("width", AppState.background.w);
-                        frame.setAttribute("height", AppState.background.h);
-                        frame.setAttribute("class", "bg-image-frame");
-                        bgLayer.appendChild(frame);
-
-                        const handles = [
-                            { class: 'nw', x: AppState.background.x, y: AppState.background.y },
-                            { class: 'ne', x: AppState.background.x + AppState.background.w, y: AppState.background.y },
-                            { class: 'sw', x: AppState.background.x, y: AppState.background.y + AppState.background.h },
-                            { class: 'se', x: AppState.background.x + AppState.background.w, y: AppState.background.y + AppState.background.h }
-                        ];
-
-                        handles.forEach(h => {
-                            const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-                            rect.setAttribute("x", h.x - 6);
-                            rect.setAttribute("y", h.y - 6);
-                            rect.setAttribute("width", 12);
-                            rect.setAttribute("height", 12);
-                            rect.setAttribute("class", `bg-handle ${h.class}`);
-                            rect.addEventListener('mousedown', (e) => startResizeBackground(e, h.class));
-                            bgLayer.appendChild(rect);
-                        });
-                    }
                 } else {
                     img.style.pointerEvents = "none";
                 }
-                
-                bgLayer.appendChild(img);
+                group.appendChild(img);
+
+                if (!bg.locked && !isDrawingCurve && bg.selected) {
+                    const frame = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                    frame.setAttribute("x", bg.x); frame.setAttribute("y", bg.y);
+                    frame.setAttribute("width", bg.w); frame.setAttribute("height", bg.h);
+                    frame.setAttribute("class", "bg-image-frame");
+                    group.appendChild(frame);
+
+                    const handles = [
+                        { class: 'nw', x: bg.x, y: bg.y },
+                        { class: 'ne', x: bg.x + bg.w, y: bg.y },
+                        { class: 'sw', x: bg.x, y: bg.y + bg.h },
+                        { class: 'se', x: bg.x + bg.w, y: bg.y + bg.h }
+                    ];
+                    handles.forEach(h => {
+                        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                        rect.setAttribute("x", h.x - 6); rect.setAttribute("y", h.y - 6);
+                        rect.setAttribute("width", 12); rect.setAttribute("height", 12);
+                        rect.setAttribute("class", `bg-handle ${h.class}`);
+                        rect.addEventListener('mousedown', (e) => startResizeBackground(e, h.class));
+                        group.appendChild(rect);
+                    });
+
+                    // Handle de rotación: círculo encima del borde superior, draggable.
+                    const rotHandleY = bg.y - 28;
+                    const rotLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    rotLine.setAttribute("x1", cx); rotLine.setAttribute("y1", bg.y);
+                    rotLine.setAttribute("x2", cx); rotLine.setAttribute("y2", rotHandleY);
+                    rotLine.setAttribute("stroke", "#a855f7"); rotLine.setAttribute("stroke-width", 1.5);
+                    rotLine.setAttribute("stroke-dasharray", "3 2");
+                    group.appendChild(rotLine);
+                    const rotHandle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                    rotHandle.setAttribute("cx", cx); rotHandle.setAttribute("cy", rotHandleY);
+                    rotHandle.setAttribute("r", 8);
+                    rotHandle.setAttribute("fill", "#a855f7");
+                    rotHandle.setAttribute("stroke", "#fff");
+                    rotHandle.setAttribute("stroke-width", 2);
+                    rotHandle.style.cursor = 'grab';
+                    rotHandle.addEventListener('mousedown', startRotateBackground);
+                    group.appendChild(rotHandle);
+                }
+
+                bgLayer.appendChild(group);
             }
 
             areasLayer.innerHTML = '';
@@ -2662,10 +2690,32 @@
             e.preventDefault();
             saveStateToHistory();
             AppState.interactionMode = 'resize_bg';
-            AppState.activeEdgeIndex = type; 
+            AppState.activeEdgeIndex = type;
             AppState.isolatedAreaId = null;
             AppState.initialClickPoint = getMousePos(e);
-            AppState.initialBgRect = {x: AppState.background.x, y: AppState.background.y, w: AppState.background.w, h: AppState.background.h};
+            AppState.initialBgRect = {
+                x: AppState.background.x, y: AppState.background.y,
+                w: AppState.background.w, h: AppState.background.h,
+                rotation: AppState.background.rotation || 0
+            };
+        }
+
+        function startRotateBackground(e) {
+            if (AppState.curveAlignment && AppState.curveAlignment.active) return;
+            e.stopPropagation();
+            e.preventDefault();
+            saveStateToHistory();
+            AppState.interactionMode = 'rotate_bg';
+            AppState.initialClickPoint = getMousePos(e);
+            AppState.initialBgRect = {
+                x: AppState.background.x, y: AppState.background.y,
+                w: AppState.background.w, h: AppState.background.h,
+                rotation: AppState.background.rotation || 0
+            };
+            const cx = AppState.background.x + AppState.background.w / 2;
+            const cy = AppState.background.y + AppState.background.h / 2;
+            const m = AppState.initialClickPoint;
+            AppState.initialBgRotAngle = Math.atan2(m.y - cy, m.x - cx);
         }
 
         function updateBgFromForm() {
@@ -2674,6 +2724,8 @@
             AppState.background.y = parseFloat(document.getElementById('prop-bg-y').value) || 0;
             AppState.background.w = parseFloat(document.getElementById('prop-bg-w').value) || 10;
             AppState.background.h = parseFloat(document.getElementById('prop-bg-h').value) || 10;
+            const rotEl = document.getElementById('prop-bg-rot');
+            if (rotEl) AppState.background.rotation = parseFloat(rotEl.value) || 0;
             renderMap();
         }
 
@@ -2817,19 +2869,63 @@
                 AppState.background.y = AppState.initialBgRect.y + dy;
             } else if (AppState.interactionMode === 'resize_bg') {
                 const type = AppState.activeEdgeIndex;
-                if (type.includes('w')) {
-                    AppState.background.x = AppState.initialBgRect.x + dx;
-                    AppState.background.w = Math.max(50, AppState.initialBgRect.w - dx);
+                const init = AppState.initialBgRect;
+                const rot = (init.rotation || 0) * Math.PI / 180;
+                // Convertimos el delta de pantalla a coordenadas LOCALES de la imagen
+                // (inverse-rotated), para que el resize funcione bien aunque haya rotación.
+                const cosR = Math.cos(-rot), sinR = Math.sin(-rot);
+                const ldx = dx * cosR - dy * sinR;
+                const ldy = dx * sinR + dy * cosR;
+                let newX = init.x, newY = init.y, newW = init.w, newH = init.h;
+                if (type.includes('w')) { newX = init.x + ldx; newW = Math.max(50, init.w - ldx); }
+                if (type.includes('e')) { newW = Math.max(50, init.w + ldx); }
+                if (type.includes('n')) { newY = init.y + ldy; newH = Math.max(50, init.h - ldy); }
+                if (type.includes('s')) { newH = Math.max(50, init.h + ldy); }
+                if (!rot) {
+                    AppState.background.x = newX; AppState.background.y = newY;
+                    AppState.background.w = newW; AppState.background.h = newH;
+                } else {
+                    // Con rotación, preservamos el CENTRO DE PANTALLA de la esquina
+                    // arrastrada para que el handle siga el ratón. Calculamos x/y nuevos
+                    // tales que la esquina (en LOCAL) acaba en la posición esperada.
+                    const oldCx = init.x + init.w / 2, oldCy = init.y + init.h / 2;
+                    // La esquina opuesta a la arrastrada debe quedarse fija en pantalla.
+                    // En LOCAL, esa esquina está a (signX*w/2, signY*h/2) del centro,
+                    // con signos según el tipo del handle:
+                    const sx = type.includes('w') ? +1 : -1; // opuesto: 'w'→derecha (+), 'e'→izquierda (-)
+                    const sy = type.includes('n') ? +1 : -1;
+                    // Esquina opuesta en LOCAL (relativa al centro), inicial y final:
+                    const oppLocalX = sx * init.w / 2, oppLocalY = sy * init.h / 2;
+                    const oppLocalXNew = sx * newW / 2, oppLocalYNew = sy * newH / 2;
+                    // En pantalla, esa esquina opuesta inicialmente está en:
+                    //   oldCx + rotX(oppLocal, rot)
+                    // Queremos que tras el resize, el NUEVO centro (newCx, newCy) cumpla:
+                    //   newCx + rotX(oppLocalNew, rot) == oldCx + rotX(oppLocal, rot)
+                    const cosF = Math.cos(rot), sinF = Math.sin(rot);
+                    const screenOppOldX = oldCx + (oppLocalX * cosF - oppLocalY * sinF);
+                    const screenOppOldY = oldCy + (oppLocalX * sinF + oppLocalY * cosF);
+                    const newCx = screenOppOldX - (oppLocalXNew * cosF - oppLocalYNew * sinF);
+                    const newCy = screenOppOldY - (oppLocalXNew * sinF + oppLocalYNew * cosF);
+                    AppState.background.x = newCx - newW / 2;
+                    AppState.background.y = newCy - newH / 2;
+                    AppState.background.w = newW;
+                    AppState.background.h = newH;
                 }
-                if (type.includes('e')) {
-                    AppState.background.w = Math.max(50, AppState.initialBgRect.w + dx);
-                }
-                if (type.includes('n')) {
-                    AppState.background.y = AppState.initialBgRect.y + dy;
-                    AppState.background.h = Math.max(50, AppState.initialBgRect.h - dy);
-                }
-                if (type.includes('s')) {
-                    AppState.background.h = Math.max(50, AppState.initialBgRect.h + dy);
+            } else if (AppState.interactionMode === 'rotate_bg') {
+                const init = AppState.initialBgRect;
+                const cx = init.x + init.w / 2;
+                const cy = init.y + init.h / 2;
+                const angleNow = Math.atan2(m.y - cy, m.x - cx);
+                let deltaDeg = (angleNow - AppState.initialBgRotAngle) * 180 / Math.PI;
+                let nextRot = (init.rotation || 0) + deltaDeg;
+                // Normalizar a (-180, 180]
+                nextRot = ((nextRot % 360) + 540) % 360 - 180;
+                AppState.background.rotation = nextRot;
+                // Refleja el valor en el form si está visible
+                const rotEl = document.getElementById('prop-bg-rot');
+                if (rotEl) {
+                    rotEl.value = Math.round(nextRot);
+                    document.getElementById('prop-bg-rot-range').value = Math.round(nextRot);
                 }
             } else if (AppState.interactionMode === 'box_select') {
                 const current = getMousePos(e);
@@ -3094,6 +3190,9 @@
             document.getElementById('prop-bg-y').value = Math.round(AppState.background.y);
             document.getElementById('prop-bg-w').value = Math.round(AppState.background.w);
             document.getElementById('prop-bg-h').value = Math.round(AppState.background.h);
+            const rot = Math.round(AppState.background.rotation || 0);
+            document.getElementById('prop-bg-rot').value = rot;
+            document.getElementById('prop-bg-rot-range').value = rot;
         }
 
         // --- Editor Asientos ---
