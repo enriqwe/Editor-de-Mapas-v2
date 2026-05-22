@@ -1898,7 +1898,8 @@
                     g.appendChild(arrow);
                 }
 
-                // Handles para arcos (Fase 2): 4 endpoints (inner/outer × start/end) + marcador de centro
+                // Handles para arcos: 4 endpoints (inner/outer × start/end) + marcador de centro
+                // + handle de rotación in-place (cuando el arco está como única selección).
                 if (isArc(area) && isActive && (!AppState.curveAlignment || !AppState.curveAlignment.active) && (!AppState.activeGroupId || isIsolated)) {
                     const sh = area.shape;
                     const handles = [
@@ -1920,6 +1921,26 @@
                     cc.style.cursor = 'move';
                     cc.addEventListener('mousedown', (e) => startMoveArcCenter(e, area));
                     g.appendChild(cc);
+
+                    // Handle de rotación in-place (sólo cuando hay UNA sola área seleccionada).
+                    // Posición: centroide del área + offset hacia fuera del centro del arco.
+                    if (AppState.selectedAreaIds.length === 1) {
+                        const cent = ArcMath.arcCentroid(sh);
+                        const ovx = cent.x - sh.center.x, ovy = cent.y - sh.center.y;
+                        const ovl = Math.hypot(ovx, ovy) || 1;
+                        const ux = ovx / ovl, uy = ovy / ovl;
+                        const hx = cent.x + ux * 30, hy = cent.y + uy * 30;
+                        const rl = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                        rl.setAttribute("x1", cent.x); rl.setAttribute("y1", cent.y);
+                        rl.setAttribute("x2", hx); rl.setAttribute("y2", hy);
+                        rl.className.baseVal = "rotate-handle-line";
+                        g.appendChild(rl);
+                        const rc = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                        rc.setAttribute("cx", hx); rc.setAttribute("cy", hy); rc.setAttribute("r", 7);
+                        rc.className.baseVal = "rotate-handle-circle";
+                        rc.addEventListener('mousedown', (e) => startRotateArea(e, area));
+                        g.appendChild(rc);
+                    }
                 }
 
                 // Tiradores individuales (solo para áreas polígono)
@@ -2691,8 +2712,11 @@
             AppState.interactionMode = 'rotate_area';
             AppState.activeAreaId = area ? area.id : null;
 
-            // Si todas las áreas seleccionadas son arcos del mismo centro, el pivote
-            // de rotación es el CENTRO del arco (no el centroide de la selección).
+            // Pivote de rotación:
+            //  - 1 arco solo  → centroide del arco (rotación in-place)
+            //  - N arcos del mismo centro → centro compartido (rota el arco como bloque)
+            //  - 1 polígono   → centroide del polígono
+            //  - multi mixto  → centroide de la selección
             const firstArea = AppState.selectedAreaIds.length > 0
                 ? AppState.areas.find(a => a.id === AppState.selectedAreaIds[0])
                 : null;
@@ -2703,8 +2727,10 @@
                         && Math.abs(a.shape.center.x - firstArea.shape.center.x) < 0.5
                         && Math.abs(a.shape.center.y - firstArea.shape.center.y) < 0.5;
                 });
-            if (allShareArcCenter) {
+            if (allShareArcCenter && AppState.selectedAreaIds.length > 1) {
                 AppState.initialCenter = { x: firstArea.shape.center.x, y: firstArea.shape.center.y };
+            } else if (firstArea && isArc(firstArea) && AppState.selectedAreaIds.length === 1) {
+                AppState.initialCenter = ArcMath.arcCentroid(firstArea.shape);
             } else if (area && AppState.selectedAreaIds.length <= 1) {
                 AppState.initialCenter = getCentroid(area.points);
             } else {
