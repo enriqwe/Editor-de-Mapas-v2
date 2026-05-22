@@ -2588,7 +2588,19 @@
             //   áreas individuales del mismo arco).
             // - Si hay aislamiento pero clicas un área de OTRO grupo (o sin grupo) → reset normal.
             if (e.ctrlKey || e.shiftKey) {
-                if (!AppState.selectedAreaIds.includes(area.id)) AppState.selectedAreaIds.push(area.id);
+                // Si el área pertenece a un grupo (arco), Ctrl/Shift+clic alterna el GRUPO
+                // ENTERO en la selección (permite seleccionar varios arcos a la vez para
+                // moverlos como bloque). Si no tiene grupo, alterna sólo esa área.
+                const targetIds = area.groupId
+                    ? AppState.areas.filter(a => a.groupId === area.groupId).map(a => a.id)
+                    : [area.id];
+                const anySelected = targetIds.some(id => AppState.selectedAreaIds.includes(id));
+                if (anySelected) {
+                    AppState.selectedAreaIds = AppState.selectedAreaIds.filter(id => !targetIds.includes(id));
+                } else {
+                    AppState.selectedAreaIds = [...AppState.selectedAreaIds, ...targetIds];
+                }
+                AppState.isolatedAreaId = null;
             } else if (area.groupId) {
                 const groupAreaIds = AppState.areas.filter(a => a.groupId === area.groupId).map(a => a.id);
                 const isolatedInSameGroup = AppState.isolatedAreaId &&
@@ -3022,12 +3034,24 @@
                 const intersectingIds = [];
                 AppState.areas.forEach(area => {
                     const bounds = getBounds(area.points);
-                    if (bounds.minX < boxRect.maxX && bounds.maxX > boxRect.minX && 
+                    if (bounds.minX < boxRect.maxX && bounds.maxX > boxRect.minX &&
                         bounds.minY < boxRect.maxY && bounds.maxY > boxRect.minY) {
                         intersectingIds.push(area.id);
                     }
                 });
-                AppState.selectedAreaIds = Array.from(new Set([...AppState.boxSelectInitialSelection, ...intersectingIds]));
+                // Si alguno de los intersectados pertenece a un grupo, expandimos el set
+                // al grupo entero (así con un box-select puedes coger uno o varios arcos
+                // enteros sin tener que tocar cada área).
+                const expanded = new Set(intersectingIds);
+                intersectingIds.forEach(id => {
+                    const a = AppState.areas.find(ar => ar.id === id);
+                    if (a && a.groupId) {
+                        AppState.areas.forEach(ar => {
+                            if (ar.groupId === a.groupId) expanded.add(ar.id);
+                        });
+                    }
+                });
+                AppState.selectedAreaIds = Array.from(new Set([...AppState.boxSelectInitialSelection, ...expanded]));
             }
             // Controladores de la interacción "Curvar"
             else if (AppState.interactionMode === 'dragging_curve_base') {
