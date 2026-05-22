@@ -572,6 +572,13 @@
                     <option value="equal">Equiparado entre áreas</option>
                 </select>
             </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-600">Compartir centro con</label>
+                <select id="fit-arc-share-center" class="w-full mt-1 border-gray-300 rounded border p-1.5 text-xs" onchange="onShareCenterChange()">
+                    <option value="">(Centro propio)</option>
+                </select>
+                <div class="text-[10px] text-gray-500 mt-0.5">Concéntrico con otro arco existente. Bloquea el centro y sólo deja ajustar la curvatura.</div>
+            </div>
             <details class="text-xs">
                 <summary class="cursor-pointer text-gray-500 hover:text-gray-700">Ajuste fino (avanzado)</summary>
                 <div class="grid grid-cols-2 gap-2 mt-2">
@@ -1908,16 +1915,18 @@
             });
 
             // Controles especiales para multi-selección que NO son grupos creados
-            // Marcador draggable del centro del arco mientras "Acoplar a arco" está activo
+            // Marcador del centro del arco mientras "Acoplar a arco" está activo. Si el centro
+            // está bloqueado (concéntrico con otro arco), se dibuja pero NO draggable.
             if (_fitArcCtx) {
                 const fcx = parseFloat(document.getElementById('fit-arc-cx').value);
                 const fcy = parseFloat(document.getElementById('fit-arc-cy').value);
                 if (Number.isFinite(fcx) && Number.isFinite(fcy)) {
+                    const locked = !!_fitArcCtx.lockedCenter;
                     const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
                     ring.setAttribute("cx", fcx); ring.setAttribute("cy", fcy);
                     ring.setAttribute("r", 14);
-                    ring.setAttribute("fill", "rgba(168,85,247,0.15)");
-                    ring.setAttribute("stroke", "#a855f7");
+                    ring.setAttribute("fill", locked ? "rgba(220,38,38,0.12)" : "rgba(168,85,247,0.15)");
+                    ring.setAttribute("stroke", locked ? "#dc2626" : "#a855f7");
                     ring.setAttribute("stroke-width", 1.5);
                     ring.setAttribute("stroke-dasharray", "4 3");
                     ring.style.pointerEvents = 'none';
@@ -1925,11 +1934,15 @@
                     const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
                     dot.setAttribute("cx", fcx); dot.setAttribute("cy", fcy);
                     dot.setAttribute("r", 7);
-                    dot.setAttribute("fill", "#9333ea");
+                    dot.setAttribute("fill", locked ? "#dc2626" : "#9333ea");
                     dot.setAttribute("stroke", "#fff");
                     dot.setAttribute("stroke-width", 2);
-                    dot.style.cursor = 'grab';
-                    dot.addEventListener('mousedown', startMoveFitArcCenter);
+                    if (!locked) {
+                        dot.style.cursor = 'grab';
+                        dot.addEventListener('mousedown', startMoveFitArcCenter);
+                    } else {
+                        dot.style.cursor = 'not-allowed';
+                    }
                     controlsLayer.appendChild(dot);
                 }
             }
@@ -2175,9 +2188,50 @@
             document.getElementById('fit-arc-start').value = '';
             document.getElementById('fit-arc-end').value = '';
 
+            // Poblar el dropdown "Compartir centro con" con los arc groups existentes.
+            const shareSelect = document.getElementById('fit-arc-share-center');
+            shareSelect.innerHTML = '<option value="">(Centro propio)</option>';
+            const arcGroups = new Map(); // groupId → primer arco
+            AppState.areas.forEach(a => {
+                if (a.groupId && isArc(a) && !sel.includes(a) && !arcGroups.has(a.groupId)) {
+                    arcGroups.set(a.groupId, a);
+                }
+            });
+            arcGroups.forEach((a, gid) => {
+                const opt = document.createElement('option');
+                opt.value = gid;
+                opt.textContent = `Arco ${gid.replace(/^arc-/, '').slice(0, 6)} (centro ${Math.round(a.shape.center.x)},${Math.round(a.shape.center.y)})`;
+                shareSelect.appendChild(opt);
+            });
+            shareSelect.value = '';
+
             document.getElementById('fit-arc-panel').classList.remove('hidden');
             applyFitArcPreview();
             lucide.createIcons();
+        }
+
+        function onShareCenterChange() {
+            if (!_fitArcCtx) return;
+            const gid = document.getElementById('fit-arc-share-center').value;
+            if (!gid) {
+                _fitArcCtx.lockedCenter = null;
+                onFitArcInput();
+                renderMap();
+                return;
+            }
+            const ref = AppState.areas.find(a => a.groupId === gid && isArc(a));
+            if (!ref) return;
+            // Bloquear el centro al del arco de referencia. Slider sigue ajustando midRadius.
+            _fitArcCtx.lockedCenter = { x: ref.shape.center.x, y: ref.shape.center.y };
+            document.getElementById('fit-arc-cx').value = Math.round(ref.shape.center.x);
+            document.getElementById('fit-arc-cy').value = Math.round(ref.shape.center.y);
+            // Slider refleja el midRadius implícito (distancia actual entre selCenter y ese centro).
+            const selC = _fitArcCtx.selCenter;
+            const midR = Math.hypot(ref.shape.center.x - selC.x, ref.shape.center.y - selC.y);
+            const pct = ArcMath.midRadiusToCurvaturePct(midR, _fitArcCtx.totalArcLen);
+            document.getElementById('fit-arc-curvature').value = Math.round(pct);
+            document.getElementById('fit-arc-curvature-val').innerText = Math.round(pct);
+            applyFitArcPreview();
         }
 
         function closeFitToArcPanel() {
@@ -2204,6 +2258,25 @@
             if (!_fitArcCtx) return;
             const pct = parseFloat(document.getElementById('fit-arc-curvature').value);
             document.getElementById('fit-arc-curvature-val').innerText = Math.round(pct);
+
+            // Si el centro está bloqueado (concéntrico) el slider NO mueve cx/cy:
+            // applyFitArcPreview ya usa el midRadius del slider directamente alrededor del
+            // centro bloqueado.
+            const ae = document.activeElement;
+            if (ae && ae.id === 'fit-arc-curvature' && !_fitArcCtx.lockedCenter) {
+                const midR = ArcMath.curvaturePctToMidRadius(pct, _fitArcCtx.totalArcLen);
+                const selC = _fitArcCtx.selCenter;
+                const fd = _fitArcCtx.frontDir || { x: 0, y: 1 };
+                const cxCur = parseFloat(document.getElementById('fit-arc-cx').value);
+                const cyCur = parseFloat(document.getElementById('fit-arc-cy').value);
+                let dxn = cxCur - selC.x, dyn = cyCur - selC.y;
+                const norm = Math.hypot(dxn, dyn);
+                if (norm > 0) { dxn /= norm; dyn /= norm; }
+                else { dxn = fd.x; dyn = fd.y; }
+                const finiteR = Number.isFinite(midR) ? midR : 50000;
+                document.getElementById('fit-arc-cx').value = Math.round(selC.x + dxn * finiteR);
+                document.getElementById('fit-arc-cy').value = Math.round(selC.y + dyn * finiteR);
+            }
             applyFitArcPreview();
         }
 
@@ -2262,20 +2335,24 @@
                 return;
             }
 
-            // pct < 100 → arco. midRadius derivado del porcentaje sobre el ancho natural total.
-            const totalNaturalWidth = ordered.reduce((sum, a) => sum + ArcMath.computeAreaNaturalSize(a).width, 0);
-            const midRadius = ArcMath.curvaturePctToMidRadius(pct, totalNaturalWidth);
-            if (!Number.isFinite(midRadius)) return;
-
-            const cx = parseFloat(document.getElementById('fit-arc-cx').value);
-            const cy = parseFloat(document.getElementById('fit-arc-cy').value);
-            // Reposicionar el centro a la distancia midRadius preservando la dirección.
+            // pct < 100 → arco. Dos modos:
+            //  - Centro propio: midRadius = distancia REAL del centro al selCenter (drag libre).
+            //  - Centro bloqueado (concéntrico con otro arco): el centro lo da el arco
+            //    de referencia; el midRadius lo dicta el slider (acerca/aleja el anillo).
             const selC = _fitArcCtx.selCenter;
-            let dxn = cx - selC.x, dyn = cy - selC.y;
-            const norm = Math.hypot(dxn, dyn) || 1;
-            dxn /= norm; dyn /= norm;
-            const adjCx = selC.x + dxn * midRadius;
-            const adjCy = selC.y + dyn * midRadius;
+            let adjCx, adjCy, midRadius;
+            if (_fitArcCtx.lockedCenter) {
+                adjCx = _fitArcCtx.lockedCenter.x;
+                adjCy = _fitArcCtx.lockedCenter.y;
+                midRadius = ArcMath.curvaturePctToMidRadius(pct, _fitArcCtx.totalArcLen);
+                if (!Number.isFinite(midRadius)) return;
+            } else {
+                const cx = parseFloat(document.getElementById('fit-arc-cx').value);
+                const cy = parseFloat(document.getElementById('fit-arc-cy').value);
+                midRadius = Math.hypot(cx - selC.x, cy - selC.y);
+                if (!(midRadius > 1)) return;
+                adjCx = cx; adjCy = cy;
+            }
             const orientationRad = Math.atan2(selC.y - adjCy, selC.x - adjCx);
             // Gap en píxeles de arc-length (constante visualmente con la curvatura),
             // mismo valor que el gap pixelado de la recta a 100% → transición suave.
@@ -2565,23 +2642,12 @@
                     const newY = AppState.fitArcCenterInitial.y + dy;
                     document.getElementById('fit-arc-cx').value = Math.round(newX);
                     document.getElementById('fit-arc-cy').value = Math.round(newY);
-                    // Recompute innerR/outerR/angles preservando tamaño de celda con el nuevo centro
-                    const sel = _fitArcCtx.selected;
-                    const orig = sel.map(a => {
-                        const snap = _fitArcCtx.snapshot.get(a.id);
-                        return {
-                            points: snap.points,
-                            rowMin: a.rowMin, rowMax: a.rowMax,
-                            seatMin: a.seatMin, seatMax: a.seatMax
-                        };
-                    });
-                    const auto = ArcMath.autoFitArcParams(orig, { center: { x: newX, y: newY } });
-                    document.getElementById('fit-arc-radius').value = Math.round(auto.midRadius);
-                    document.getElementById('fit-arc-radius-val').innerText = Math.round(auto.midRadius);
-                    document.getElementById('fit-arc-inner').value = Math.round(auto.innerR);
-                    document.getElementById('fit-arc-outer').value = Math.round(auto.outerR);
-                    document.getElementById('fit-arc-start').value = Math.round(auto.startAngleDeg);
-                    document.getElementById('fit-arc-end').value = Math.round(auto.endAngleDeg);
+                    // Actualiza el slider para reflejar el midRadius implícito del nuevo centro.
+                    const selC = _fitArcCtx.selCenter;
+                    const midR = Math.hypot(newX - selC.x, newY - selC.y);
+                    const pct = ArcMath.midRadiusToCurvaturePct(midR, _fitArcCtx.totalArcLen);
+                    document.getElementById('fit-arc-curvature').value = Math.round(pct);
+                    document.getElementById('fit-arc-curvature-val').innerText = Math.round(pct);
                     applyFitArcPreview();
                 }
                 return;
