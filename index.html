@@ -1954,11 +1954,11 @@
                         ch.className.baseVal = "corner-handle"; ch.addEventListener('mousedown', (e) => startMoveCorner(e, area, i));
                         g.appendChild(ch);
 
-                        const nextI = (i + 1) % 4, pNext = area.points[nextI];
+                        const nextI = (i + 1) % area.points.length, pNext = area.points[nextI];
                         const eh = document.createElementNS("http://www.w3.org/2000/svg", "rect");
                         eh.setAttribute("x", (p.x + pNext.x) / 2 - 5); eh.setAttribute("y", (p.y + pNext.y) / 2 - 5);
                         eh.setAttribute("width", 10); eh.setAttribute("height", 10);
-                        eh.style.cursor = (i === 0 || i === 2) ? 'ns-resize' : 'ew-resize';
+                        eh.style.cursor = 'move';
                         eh.className.baseVal = "edge-handle"; eh.addEventListener('mousedown', (e) => startMoveEdge(e, area, i));
                         g.appendChild(eh);
                     });
@@ -2962,7 +2962,7 @@
                 });
             } else if (AppState.interactionMode === 'move_edge') {
                 const activeArea = AppState.areas.find(ar => ar.id === AppState.activeAreaId);
-                const i1 = AppState.activeEdgeIndex, i2 = (i1 + 1) % 4;
+                const i1 = AppState.activeEdgeIndex, i2 = (i1 + 1) % activeArea.points.length;
                 const p1 = AppState.initialPointsMap[activeArea.id][i1], p2 = AppState.initialPointsMap[activeArea.id][i2];
                 const evx = p2.x - p1.x, evy = p2.y - p1.y, len = Math.sqrt(evx*evx+evy*evy);
                 const nx = -evy/len, ny = evx/len, dot = dx*nx + dy*ny;
@@ -4128,64 +4128,69 @@
             saveStateToHistory();
             const area = AppState.areas.find(x => x.id === AppState.selectedAreaIds[0]);
             if (!area) return;
-
             const cols = area.seatMax - area.seatMin + 1;
             const rows = area.rowMax - area.rowMin + 1;
-
             if (cols <= 0 || rows <= 0) return;
-
-            // El polígono se hace LIGERAMENTE más grande que el bloque de asientos
-            // para que haya un margen visible entre el borde del área y los asientos.
             const M = AREA_INNER_MARGIN_PX;
-            const seatBlockW = cols * GRID_STEP;
-            const seatBlockH = rows * GRID_STEP;
-            const targetWidth = seatBlockW + 2 * M;
-            const targetHeight = seatBlockH + 2 * M;
 
-            const p0 = area.points[0];
-            const p1 = area.points[1];
-            const p3 = area.points[3];
+            // Asegurar seatGrid (no lo modificamos: queremos que los asientos no se muevan).
+            if (!area.seatGrid && area.points && area.points.length >= 4) {
+                area.seatGrid = ArcMath.computeSeatGridFromPolygon(area);
+            }
+            const grid = area.seatGrid;
 
-            const dx1 = p1.x - p0.x;
-            const dy1 = p1.y - p0.y;
-            const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+            // Si hay asientos: calcula el convex hull alrededor de las celdas que sí
+            // existen (con margen). El polígono queda pegado a los seats sin moverlos.
+            const seats = AppState.seats.filter(s => s.areaId === area.id);
+            if (seats.length > 0 && grid) {
+                const points = [];
+                const halfW = grid.seatSpacing / 2 + M;
+                const halfH = grid.rowSpacing / 2 + M;
+                seats.forEach(seat => {
+                    const offSeat = (seat.seatPos - area.seatMin + 0.5) * grid.seatSpacing;
+                    const offRow = (area.rowMax - seat.rowPos + 0.5) * grid.rowSpacing;
+                    const cx = grid.origin.x + offSeat * grid.seatAxis.x + offRow * grid.rowAxis.x;
+                    const cy = grid.origin.y + offSeat * grid.seatAxis.y + offRow * grid.rowAxis.y;
+                    for (const dx of [-halfW, halfW]) {
+                        for (const dy of [-halfH, halfH]) {
+                            points.push({
+                                x: cx + dx * grid.seatAxis.x + dy * grid.rowAxis.x,
+                                y: cy + dx * grid.seatAxis.y + dy * grid.rowAxis.y
+                            });
+                        }
+                    }
+                });
+                area.points = ArcMath.convexHull(points);
+            } else {
+                // Sin asientos: fallback al rectángulo de cols×GRID_STEP + 2M alrededor de p0.
+                const seatBlockW = cols * GRID_STEP;
+                const seatBlockH = rows * GRID_STEP;
+                const targetWidth = seatBlockW + 2 * M;
+                const targetHeight = seatBlockH + 2 * M;
+                const p0 = area.points[0], p1 = area.points[1], p3 = area.points[3];
+                const dx1 = p1.x - p0.x, dy1 = p1.y - p0.y;
+                const len1 = Math.hypot(dx1, dy1);
+                const dx3 = p3.x - p0.x, dy3 = p3.y - p0.y;
+                const len3 = Math.hypot(dx3, dy3);
+                if (len1 === 0 || len3 === 0) return;
+                const ux1 = dx1 / len1, uy1 = dy1 / len1;
+                const ux3 = dx3 / len3, uy3 = dy3 / len3;
+                const newP1 = { x: p0.x + ux1 * targetWidth, y: p0.y + uy1 * targetWidth };
+                const newP3 = { x: p0.x + ux3 * targetHeight, y: p0.y + uy3 * targetHeight };
+                const newP2 = { x: newP1.x + newP3.x - p0.x, y: newP1.y + newP3.y - p0.y };
+                area.points = [p0, newP1, newP2, newP3];
+                area.seatGrid = {
+                    origin: { x: p0.x + ux1 * M + ux3 * M, y: p0.y + uy1 * M + uy3 * M },
+                    seatAxis: { x: ux1, y: uy1 },
+                    rowAxis: { x: ux3, y: uy3 },
+                    seatSpacing: GRID_STEP,
+                    rowSpacing: GRID_STEP
+                };
+            }
 
-            const dx3 = p3.x - p0.x;
-            const dy3 = p3.y - p0.y;
-            const len3 = Math.sqrt(dx3 * dx3 + dy3 * dy3);
-
-            if (len1 === 0 || len3 === 0) return;
-
-            const ux1 = dx1 / len1;
-            const uy1 = dy1 / len1;
-
-            const ux3 = dx3 / len3;
-            const uy3 = dy3 / len3;
-
-            const newP1 = { x: p0.x + ux1 * targetWidth, y: p0.y + uy1 * targetWidth };
-            const newP3 = { x: p0.x + ux3 * targetHeight, y: p0.y + uy3 * targetHeight };
-
-            const newP2 = {
-                x: newP1.x + newP3.x - p0.x,
-                y: newP1.y + newP3.y - p0.y
-            };
-
-            area.points = [p0, newP1, newP2, newP3];
-
-            // Posicionar el seatGrid para que los asientos queden centrados con el margen.
-            area.seatGrid = {
-                origin: { x: p0.x + ux1 * M + ux3 * M, y: p0.y + uy1 * M + uy3 * M },
-                seatAxis: { x: ux1, y: uy1 },
-                rowAxis: { x: ux3, y: uy3 },
-                seatSpacing: GRID_STEP,
-                rowSpacing: GRID_STEP
-            };
-
-            // Actualizar si estaba agrupada
             if (area.groupId && AppState.groups[area.groupId]) {
                 AppState.groups[area.groupId].originalPointsMap[area.id] = area.points;
             }
-
             renderMap();
             populateAreaForm();
         }

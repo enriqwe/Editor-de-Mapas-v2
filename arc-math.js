@@ -397,6 +397,30 @@
      *  - si es arco → arc length en midRadius × thickness radial
      */
     /**
+     * Convex hull (Andrew's monotone chain). Devuelve los vértices del polígono
+     * convexo mínimo que contiene a todos los puntos, en orden consistente.
+     */
+    function convexHull(points) {
+        if (!Array.isArray(points) || points.length < 3) return (points || []).slice();
+        const pts = [...points].sort((a, b) => a.x === b.x ? a.y - b.y : a.x - b.x);
+        const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+        const lower = [];
+        for (const p of pts) {
+            while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+            lower.push(p);
+        }
+        const upper = [];
+        for (let i = pts.length - 1; i >= 0; i--) {
+            const p = pts[i];
+            while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+            upper.push(p);
+        }
+        upper.pop();
+        lower.pop();
+        return lower.concat(upper);
+    }
+
+    /**
      * Devuelve el vector unitario que indica hacia dónde apunta el frente del
      * área (rowMin / fila más baja, hacia donde está el campo).
      *  - polígono: perpendicular al lado p2-p3 (mismo cálculo que el render
@@ -754,6 +778,7 @@
         computeFrontDirection, averageFrontDirection,
         computeSeatGridFromPolygon, seatPosFromGrid,
         translateSeatGrid, rotateSeatGrid,
+        convexHull,
         defaultArcShape, clampArcShape,
         angleFromPoint, radiusFromPoint,
         parseAreaShape, serializeAreaShape

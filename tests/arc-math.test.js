@@ -304,6 +304,25 @@ test('rotateSeatGrid: rota origen y ejes 90° CW alrededor del origen', () => {
     assert.ok(approx(r.rowAxis.x, -1, 1e-9) && approx(r.rowAxis.y, 0, 1e-9));
 });
 
+// -------- convexHull --------
+test('convexHull: 4 esquinas + 1 interior → ignora el interior', () => {
+    const pts = [
+        { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 },
+        { x: 5, y: 5 } // interior
+    ];
+    const hull = ArcMath.convexHull(pts);
+    assert.equal(hull.length, 4);
+    // El interior NO está en el hull
+    const hasInterior = hull.some(p => p.x === 5 && p.y === 5);
+    assert.equal(hasInterior, false);
+});
+
+test('convexHull: < 3 puntos devuelve copia tal cual', () => {
+    const pts = [{ x: 0, y: 0 }, { x: 1, y: 1 }];
+    const hull = ArcMath.convexHull(pts);
+    assert.equal(hull.length, 2);
+});
+
 // -------- computeFrontDirection / averageFrontDirection --------
 test('computeFrontDirection: rectángulo estándar → (0,1) hacia abajo', () => {
     const area = rectAreaForTest(0, 0, 100, 50, 5, 10);
