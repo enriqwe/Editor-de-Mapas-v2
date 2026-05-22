@@ -2364,6 +2364,7 @@
             if (!gid) {
                 _fitArcCtx.lockedCenter = null;
                 _fitArcCtx.lockedRefGroupId = null;
+                _fitArcCtx.midRadiusOverride = null;
                 snapBtn.classList.add('hidden');
                 onFitArcInput();
                 renderMap();
@@ -2438,13 +2439,18 @@
             // interno. Así nunca se solapan y queda una continuación visual.
             const RADIAL_GAP = 6;
             const currentPct = parseFloat(document.getElementById('fit-arc-curvature').value);
-            const currentMidR = ArcMath.curvaturePctToMidRadius(currentPct, _fitArcCtx.totalArcLen);
+            const currentMidR = _fitArcCtx.midRadiusOverride
+                || ArcMath.curvaturePctToMidRadius(currentPct, _fitArcCtx.totalArcLen);
             let desiredMidR;
             if (!Number.isFinite(currentMidR) || currentMidR >= refMidR) {
                 desiredMidR = refOuterR + newThickness / 2 + RADIAL_GAP;
             } else {
                 desiredMidR = Math.max(newThickness / 2 + 1, refInnerR - newThickness / 2 - RADIAL_GAP);
             }
+            // Guardamos el midR EXACTO en un override que applyFitArcPreview usa
+            // directamente: si lo guardáramos sólo como pct en el slider, el
+            // redondeo del slider (step=1) se comería el hueco radial.
+            _fitArcCtx.midRadiusOverride = desiredMidR;
             const newPct = ArcMath.midRadiusToCurvaturePct(desiredMidR, _fitArcCtx.totalArcLen);
             document.getElementById('fit-arc-curvature').value = Math.round(newPct);
             document.getElementById('fit-arc-curvature-val').innerText = Math.round(newPct);
@@ -2487,10 +2493,12 @@
             const pct = parseFloat(document.getElementById('fit-arc-curvature').value);
             document.getElementById('fit-arc-curvature-val').innerText = Math.round(pct);
 
-            // Si el centro está bloqueado (concéntrico) el slider NO mueve cx/cy:
-            // applyFitArcPreview ya usa el midRadius del slider directamente alrededor del
-            // centro bloqueado.
+            // Si el usuario mueve el slider, descartamos cualquier override de midR
+            // (puesto por snapGapToRefArc) para que el slider vuelva a mandar.
             const ae = document.activeElement;
+            if (ae && ae.id === 'fit-arc-curvature') {
+                _fitArcCtx.midRadiusOverride = null;
+            }
             if (ae && ae.id === 'fit-arc-curvature' && !_fitArcCtx.lockedCenter) {
                 const midR = ArcMath.curvaturePctToMidRadius(pct, _fitArcCtx.totalArcLen);
                 const selC = _fitArcCtx.selCenter;
@@ -2573,7 +2581,11 @@
             if (_fitArcCtx.lockedCenter) {
                 adjCx = _fitArcCtx.lockedCenter.x;
                 adjCy = _fitArcCtx.lockedCenter.y;
-                midRadius = ArcMath.curvaturePctToMidRadius(pct, _fitArcCtx.totalArcLen);
+                // Si snapGapToRefArc estableció un midR exacto, lo usamos en lugar del
+                // valor derivado del slider (que pierde precisión por el step=1).
+                midRadius = (_fitArcCtx.midRadiusOverride > 0)
+                    ? _fitArcCtx.midRadiusOverride
+                    : ArcMath.curvaturePctToMidRadius(pct, _fitArcCtx.totalArcLen);
                 if (!Number.isFinite(midRadius)) return;
             } else {
                 const cx = parseFloat(document.getElementById('fit-arc-cx').value);
