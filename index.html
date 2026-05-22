@@ -2361,15 +2361,17 @@
         /**
          * Calcula la separación entre áreas necesaria para que el nuevo arco cubra
          * exactamente el mismo rango angular (startAngle..endAngle) que el arco
-         * compartido como referencia. Útil para que dos anillos concéntricos
-         * coincidan en sus extremos.
+         * compartido como referencia. Fórmula equivalente a fitGroupAsArc:
+         *   totalSweep = totalWidth / midR + (N-1) × gap / midR  = refSpan
+         *   ⇒ gap_px = (refSpan × midR − totalWidth) / (N−1)
+         * con totalWidth = Σ(nSeats × seatSpacing + 2 × marginPx),
+         *      marginPx  = max(AREA_INNER_MARGIN_PX, seatSpacing × 0.30).
          */
         function snapGapToRefArc() {
             if (!_fitArcCtx || !_fitArcCtx.lockedRefGroupId) return;
             const gid = _fitArcCtx.lockedRefGroupId;
             const refAreas = AppState.areas.filter(a => a.groupId === gid && isArc(a));
             if (refAreas.length === 0) return;
-            // Rango angular total del arco de referencia.
             let refMin = Infinity, refMax = -Infinity;
             refAreas.forEach(a => {
                 if (a.shape.startAngle < refMin) refMin = a.shape.startAngle;
@@ -2382,21 +2384,28 @@
             if (!Number.isFinite(midR) || midR <= 0) return;
             const arcLen = refSpan * midR;
 
-            // Ancho total ocupado por las áreas del NUEVO arco (no por los huecos).
+            // marginPx debe coincidir EXACTAMENTE con el cálculo interno de
+            // fitGroupAsArc para que el gap resultante encaje sin error.
             const sel = _fitArcCtx.selected;
-            const seatSpacing = AppState.globalSeatSpacing;
-            const marginPx = Math.max(2, (seatSpacing || 10) * 0.15);
-            let totalContent = 0;
+            const seatSpacing = AppState.globalSeatSpacing
+                || (function () {
+                    const sp = sel.map(a => {
+                        const sz = ArcMath.computeAreaNaturalSize(a);
+                        return sz.width / ((a.seatMax - a.seatMin + 1) || 1);
+                    });
+                    return sp.sort((a, b) => a - b)[Math.floor(sp.length / 2)] || 10;
+                })();
+            const marginPx = Math.max(AREA_INNER_MARGIN_PX, seatSpacing * 0.30);
+
+            let totalWidth = 0;
             sel.forEach(a => {
                 const nSeats = (a.seatMax - a.seatMin + 1) || 1;
-                const sp = seatSpacing || (ArcMath.computeAreaNaturalSize(a).width / nSeats);
-                totalContent += nSeats * sp + 2 * marginPx;
+                totalWidth += nSeats * seatSpacing + 2 * marginPx;
             });
 
             const N = sel.length;
             if (N < 2) return;
-            // gap × (N-1) + totalContent = arcLen → gap = (arcLen - totalContent) / (N-1)
-            const gap = (arcLen - totalContent) / (N - 1);
+            const gap = (arcLen - totalWidth) / (N - 1);
             const gapClamped = Math.max(0, gap);
             document.getElementById('fit-arc-gap').value = Math.round(gapClamped * 10) / 10;
             applyFitArcPreview();
