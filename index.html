@@ -2164,12 +2164,14 @@
                         const item = document.createElement('div');
                         item.className = `area-item ${AppState.selectedAreaIds.includes(area.id) ? 'active' : ''}`;
                         item.innerHTML = `<span class="truncate">${area.title}</span>`;
-                        item.onclick = (e) => { 
-                            e.stopPropagation(); 
-                            if (e.ctrlKey || e.metaKey) toggleSelection(area.id, true); 
-                            else toggleSelection(area.id, false); 
-                            AppState.activeAreaId = area.id; 
-                            renderMap(); 
+                        item.onclick = (e) => {
+                            e.stopPropagation();
+                            if (e.ctrlKey || e.metaKey) toggleSelection(area.id, true);
+                            else toggleSelection(area.id, false);
+                            AppState.activeAreaId = area.id;
+                            // Centra el viewport en el área clicada para encontrarla en el mapa.
+                            centerViewOnArea(area);
+                            renderMap();
                         };
                         secContainer.appendChild(item);
                     });
@@ -3220,6 +3222,45 @@
         }, { passive: false });
 
         function resetZoom() { AppState.zoom = 1; AppState.panX = 0; AppState.panY = 0; updateTransform(); }
+
+        /**
+         * Centra el viewport en el área indicada. Si el área no está visible (offscreen
+         * o muy pequeña al zoom actual), también ajusta el zoom para que se vea con un
+         * margen razonable.
+         */
+        function centerViewOnArea(area) {
+            if (!area) return;
+            const viewport = document.getElementById('main-viewport');
+            const rect = viewport.getBoundingClientRect();
+            // Bounding box del área (en coords del mundo).
+            let cx, cy, w, h;
+            if (isArc(area)) {
+                const pts = ArcMath.arcOutlinePoints(area.shape, 24);
+                const b = getBounds(pts);
+                cx = (b.minX + b.maxX) / 2;
+                cy = (b.minY + b.maxY) / 2;
+                w = b.width; h = b.height;
+            } else {
+                const b = getBounds(area.points);
+                cx = (b.minX + b.maxX) / 2;
+                cy = (b.minY + b.maxY) / 2;
+                w = b.width; h = b.height;
+            }
+            // Si el área queda muy pequeña en el viewport al zoom actual, ajustamos
+            // para que ocupe ~50% del lado más corto. No subimos del zoom actual si
+            // ya era más amplio (preservamos la sensación del usuario al inspeccionar).
+            const margin = 1.4; // 40% de margen
+            const fitZoomX = rect.width / (w * margin);
+            const fitZoomY = rect.height / (h * margin);
+            const fitZoom = Math.max(0.1, Math.min(5, Math.min(fitZoomX, fitZoomY)));
+            const targetZoom = Math.max(AppState.zoom, Math.min(2, fitZoom));
+            AppState.zoom = targetZoom;
+            // Pan tal que (cx, cy) quede en el centro del viewport.
+            AppState.panX = rect.width / 2 - cx * AppState.zoom;
+            AppState.panY = rect.height / 2 - cy * AppState.zoom;
+            updateTransform();
+        }
+
         function adjustZoom(d) { 
             const viewport = document.getElementById('main-viewport');
             const rect = viewport.getBoundingClientRect();
