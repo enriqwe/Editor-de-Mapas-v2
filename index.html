@@ -2626,15 +2626,22 @@
                 const groupAreaIds = AppState.areas.filter(a => a.groupId === area.groupId).map(a => a.id);
                 const isolatedInSameGroup = AppState.isolatedAreaId &&
                     AppState.areas.find(a => a.id === AppState.isolatedAreaId)?.groupId === area.groupId;
+                const alreadySelected = AppState.selectedAreaIds.includes(area.id);
                 if (isolatedInSameGroup) {
                     // Cambiar el aislamiento a esta otra área del mismo grupo.
                     AppState.isolatedAreaId = area.id;
                     AppState.selectedAreaIds = [area.id];
                 } else if (AppState.isolatedAreaId === area.id) {
-                    // Click sobre la propia área aislada: mantener selección.
                     AppState.selectedAreaIds = [area.id];
+                } else if (alreadySelected) {
+                    // El área ya estaba seleccionada (selección multi-grupo): NO resetear.
+                    // Mantenemos la selección actual y aseguramos que el grupo de ESTA área
+                    // esté completo (por si había una selección parcial).
+                    const set = new Set(AppState.selectedAreaIds);
+                    groupAreaIds.forEach(id => set.add(id));
+                    AppState.selectedAreaIds = [...set];
+                    AppState.isolatedAreaId = null;
                 } else {
-                    // Seleccionar todo el grupo.
                     AppState.selectedAreaIds = groupAreaIds;
                     AppState.isolatedAreaId = null;
                 }
