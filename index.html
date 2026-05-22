@@ -2775,7 +2775,15 @@
                 }
                 AppState.isolatedAreaId = null;
             }
-            
+
+            // El área CLICADA queda al principio de la selección. Así "Editar área
+            // individual" aísla por defecto el área en la que el usuario pulsó (lo
+            // habitual cuando entra al modo de edición individual), no la primera
+            // del grupo en orden interno.
+            if (AppState.selectedAreaIds.includes(area.id) && AppState.selectedAreaIds[0] !== area.id) {
+                AppState.selectedAreaIds = [area.id, ...AppState.selectedAreaIds.filter(id => id !== area.id)];
+            }
+
             updateActiveGroup();
 
             AppState.interactionMode = 'move_area';
