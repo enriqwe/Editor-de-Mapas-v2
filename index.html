@@ -4215,9 +4215,15 @@
             // existen (con margen). El polígono queda pegado a los seats sin moverlos.
             const seats = AppState.seats.filter(s => s.areaId === area.id);
             if (seats.length > 0 && grid) {
+                // Tolerancia para Douglas-Peucker. Como DP puede empujar las aristas
+                // hacia dentro hasta `tolerance` px, ampliamos el hull-source por
+                // `M + tolerance` para que el margen final >= M y los seats no
+                // queden nunca solapados con el borde del área.
+                const tolerance = AREA_INNER_MARGIN_PX * 1.5;
+                const expand = AREA_INNER_MARGIN_PX + tolerance;
                 const points = [];
-                const halfW = grid.seatSpacing / 2 + M;
-                const halfH = grid.rowSpacing / 2 + M;
+                const halfW = grid.seatSpacing / 2 + expand;
+                const halfH = grid.rowSpacing / 2 + expand;
                 seats.forEach(seat => {
                     const offSeat = (seat.seatPos - area.seatMin + 0.5) * grid.seatSpacing;
                     const offRow = (area.rowMax - seat.rowPos + 0.5) * grid.rowSpacing;
@@ -4232,11 +4238,8 @@
                         }
                     }
                 });
-                // Hull con simplificación Douglas-Peucker. Tolerancia agresiva
-                // (≈2× el margen) para colapsar la "escalera" del hull en pocos
-                // bordes rectos largos → 5-8 vértices típicamente.
                 const hull = ArcMath.convexHull(points);
-                area.points = ArcMath.simplifyPolygon(hull, AREA_INNER_MARGIN_PX * 2.5);
+                area.points = ArcMath.simplifyPolygon(hull, tolerance);
             } else {
                 // Sin asientos: fallback al rectángulo de cols×GRID_STEP + 2M alrededor de p0.
                 const seatBlockW = cols * GRID_STEP;
