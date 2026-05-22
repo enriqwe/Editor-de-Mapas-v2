@@ -698,7 +698,14 @@
      * Usado cuando la curvatura es 100% (recta perfecta).
      */
     function layAreasFlat(areas, opts) {
-        const { center, directionRad = 0, gapPx = 4, forceSeatSpacing, forceRowSpacing } = opts;
+        const {
+            center, directionRad = 0, gapPx = 4,
+            forceSeatSpacing, forceRowSpacing,
+            // Margen interior entre asientos y borde del área. Por defecto 0 para
+            // compat con código viejo y tests; los callers que quieran margen pasan
+            // marginRatio (p.ej. 0.30) y/o marginMinPx (p.ej. 12).
+            marginRatio = 0, marginMinPx = 0
+        } = opts;
         if (!Array.isArray(areas) || areas.length === 0) throw new Error('layAreasFlat: areas vacío');
         const stats = areas.map(a => {
             const sz = computeAreaNaturalSize(a);
@@ -711,13 +718,13 @@
                 nRows, nSeats
             };
         });
-        // Si se pasan globales forzados, sobrescriben los naturales para que el ancho de
-        // cada área se calcule como nSeats × paso global (consistencia entre arcos).
         const rowSpacing = (forceRowSpacing > 0) ? forceRowSpacing : median(stats.map(s => s.rowSpacing));
         const seatSpacing = (forceSeatSpacing > 0) ? forceSeatSpacing : null;
         const maxRows = Math.max(...stats.map(s => s.nRows));
-        const H = maxRows * rowSpacing;
-        const widths = stats.map(s => seatSpacing ? s.nSeats * seatSpacing : s.naturalWidth);
+        const refSeatSpacing = seatSpacing || median(stats.map(s => s.seatSpacing));
+        const marginPx = Math.max(marginMinPx, refSeatSpacing * marginRatio);
+        const H = maxRows * rowSpacing + 2 * marginPx;
+        const widths = stats.map(s => (seatSpacing ? s.nSeats * seatSpacing : s.naturalWidth) + 2 * marginPx);
         const totalW = widths.reduce((acc, w) => acc + w, 0) + (areas.length - 1) * gapPx;
         const dirX = Math.cos(directionRad), dirY = Math.sin(directionRad);
         const perpX = -dirY, perpY = dirX; // perpendicular "hacia atrás" (rowMax)

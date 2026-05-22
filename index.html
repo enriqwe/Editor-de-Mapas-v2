@@ -2558,15 +2558,46 @@
                     directionRad,
                     gapPx: (gapPx >= 0) ? gapPx : 4,
                     forceSeatSpacing: AppState.globalSeatSpacing,
-                    forceRowSpacing: AppState.globalRowSpacing
+                    forceRowSpacing: AppState.globalRowSpacing,
+                    marginRatio: 0.30,
+                    marginMinPx: AREA_INNER_MARGIN_PX
                 });
+                // Reconstruimos el seatGrid manualmente con el offset del margen,
+                // si no, computeSeatGridFromPolygon derivaría seatSpacing del ancho
+                // total (con margen) y los asientos quedarían sin margen.
+                const sp = AppState.globalSeatSpacing
+                    || (function () {
+                        const arr = ordered.map(a => ArcMath.computeAreaNaturalSize(a).width / ((a.seatMax - a.seatMin + 1) || 1));
+                        return arr.sort((a, b) => a - b)[Math.floor(arr.length / 2)] || 10;
+                    })();
+                const marginPx = Math.max(AREA_INNER_MARGIN_PX, sp * 0.30);
                 const byId = new Map(layout.map(r => [r.id, r.points]));
                 sel.forEach(area => {
                     const pts = byId.get(area.id);
                     if (!pts) return;
                     area.points = pts;
                     delete area.shape;
-                    area.seatGrid = ArcMath.computeSeatGridFromPolygon(area);
+                    const p0 = pts[0], p1 = pts[1], p3 = pts[3];
+                    const sVec = { x: p1.x - p0.x, y: p1.y - p0.y };
+                    const rVec = { x: p3.x - p0.x, y: p3.y - p0.y };
+                    const sLen = Math.hypot(sVec.x, sVec.y) || 1;
+                    const rLen = Math.hypot(rVec.x, rVec.y) || 1;
+                    const sAxis = { x: sVec.x / sLen, y: sVec.y / sLen };
+                    const rAxis = { x: rVec.x / rLen, y: rVec.y / rLen };
+                    const nSeatsArea = (area.seatMax - area.seatMin + 1) || 1;
+                    const nRowsArea = (area.rowMax - area.rowMin + 1) || 1;
+                    const seatSp = AppState.globalSeatSpacing || (sLen - 2 * marginPx) / nSeatsArea;
+                    const rowSp = AppState.globalRowSpacing || (rLen - 2 * marginPx) / nRowsArea;
+                    area.seatGrid = {
+                        origin: {
+                            x: p0.x + marginPx * sAxis.x + marginPx * rAxis.x,
+                            y: p0.y + marginPx * sAxis.y + marginPx * rAxis.y
+                        },
+                        seatAxis: sAxis,
+                        rowAxis: rAxis,
+                        seatSpacing: seatSp,
+                        rowSpacing: rowSp
+                    };
                 });
                 renderMap();
                 return;
