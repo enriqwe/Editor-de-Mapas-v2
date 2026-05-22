@@ -4220,10 +4220,11 @@
                         }
                     }
                 });
-                // Hull con simplificación: quita la "escalera" que produce el hull sobre
-                // la rejilla de celdas → un polígono limpio con 4–8 vértices típicamente.
+                // Hull con simplificación Douglas-Peucker. Tolerancia agresiva
+                // (≈2× el margen) para colapsar la "escalera" del hull en pocos
+                // bordes rectos largos → 5-8 vértices típicamente.
                 const hull = ArcMath.convexHull(points);
-                area.points = ArcMath.simplifyPolygon(hull, AREA_INNER_MARGIN_PX);
+                area.points = ArcMath.simplifyPolygon(hull, AREA_INNER_MARGIN_PX * 2.5);
             } else {
                 // Sin asientos: fallback al rectángulo de cols×GRID_STEP + 2M alrededor de p0.
                 const seatBlockW = cols * GRID_STEP;

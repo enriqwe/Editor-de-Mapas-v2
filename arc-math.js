@@ -421,38 +421,58 @@
     }
 
     /**
-     * Simplifica un polígono cerrado: elimina vértices cuya distancia perpendicular
-     * al segmento entre el vértice anterior y el siguiente sea menor que `tolerance`.
-     * Útil para quitar el "staircase" que produce el convex hull sobre rejillas de
-     * asientos: el resultado tiene mucho menos vértices y bordes rectos largos.
+     * Simplifica un polígono cerrado con Douglas-Peucker. Devuelve la lista
+     * mínima de vértices tal que ninguna desviación perpendicular al polígono
+     * original supere `tolerance`. Mucho más agresivo que el filtro iterativo
+     * vertex-a-vertex, especialmente para curvas suaves y polígonos largos.
      */
     function simplifyPolygon(points, tolerance) {
         tolerance = tolerance == null ? 5 : tolerance;
-        if (!Array.isArray(points) || points.length <= 3) return (points || []).slice();
-        let pts = [...points];
-        let changed = true;
-        while (changed && pts.length > 3) {
-            changed = false;
-            const next = [];
-            for (let i = 0; i < pts.length; i++) {
-                const A = pts[(i - 1 + pts.length) % pts.length];
-                const B = pts[i];
-                const C = pts[(i + 1) % pts.length];
-                const dx = C.x - A.x, dy = C.y - A.y;
-                const len = Math.hypot(dx, dy);
-                const perpDist = len < 1e-9
-                    ? Math.hypot(B.x - A.x, B.y - A.y)
-                    : Math.abs((B.x - A.x) * dy - (B.y - A.y) * dx) / len;
-                if (perpDist >= tolerance) {
-                    next.push(B);
-                } else {
-                    changed = true;
-                }
-            }
-            if (next.length < 3) break;
-            pts = next;
+        if (!Array.isArray(points) || points.length < 4) return (points || []).slice();
+        const N = points.length;
+
+        function perpDist(pt, a, b) {
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const len = Math.hypot(dx, dy);
+            if (len < 1e-9) return Math.hypot(pt.x - a.x, pt.y - a.y);
+            return Math.abs((pt.x - a.x) * dy - (pt.y - a.y) * dx) / len;
         }
-        return pts;
+
+        // Para polígono cerrado, partimos por los dos vértices más alejados.
+        let diamA = 0, diamB = 0, maxD = -1;
+        for (let i = 0; i < N; i++) {
+            for (let j = i + 1; j < N; j++) {
+                const d = Math.hypot(points[i].x - points[j].x, points[i].y - points[j].y);
+                if (d > maxD) { maxD = d; diamA = i; diamB = j; }
+            }
+        }
+
+        // Reordenamos para que diamA esté en 0.
+        const arr = [];
+        for (let i = 0; i < N; i++) arr.push(points[(diamA + i) % N]);
+        const newB = (diamB - diamA + N) % N;
+
+        function dp(start, end) {
+            if (end <= start + 1) return [];
+            const a = arr[start], b = arr[end];
+            let bestD = -1, bestI = -1;
+            for (let i = start + 1; i < end; i++) {
+                const d = perpDist(arr[i], a, b);
+                if (d > bestD) { bestD = d; bestI = i; }
+            }
+            if (bestD > tolerance) {
+                const left = dp(start, bestI);
+                const right = dp(bestI, end);
+                return [...left, arr[bestI], ...right];
+            }
+            return [];
+        }
+
+        const out = [arr[0]];
+        out.push(...dp(0, newB));
+        out.push(arr[newB]);
+        out.push(...dp(newB, N - 1));
+        return out;
     }
 
     /**
