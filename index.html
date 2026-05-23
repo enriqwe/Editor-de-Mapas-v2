@@ -1428,7 +1428,28 @@
                         area.shape = restoredShape;
                         syncArcPoints(area);
                     }
-                    if (restoredSeatGrid) area.seatGrid = restoredSeatGrid;
+                    if (restoredSeatGrid) {
+                        // Validar consistencia con el polígono: si el seatGrid almacenado
+                        // tiene los ejes rotados respecto al polígono (puede pasar en CSVs
+                        // donde el polígono se editó tras setear el grid), lo descartamos
+                        // para que se recompute lazy desde area.points → los asientos
+                        // quedarán dentro del polígono en lugar de fuera.
+                        let consistent = true;
+                        if (restoredPoints && restoredPoints.length === 4 && restoredSeatGrid.seatAxis) {
+                            const p0 = restoredPoints[0], p1 = restoredPoints[1];
+                            const dx = p1.x - p0.x, dy = p1.y - p0.y;
+                            const len = Math.hypot(dx, dy);
+                            if (len > 0) {
+                                const polyAxisX = dx / len, polyAxisY = dy / len;
+                                const dot = polyAxisX * restoredSeatGrid.seatAxis.x
+                                          + polyAxisY * restoredSeatGrid.seatAxis.y;
+                                // cos(5°) ≈ 0.996. Toleramos hasta 5° de diferencia.
+                                if (dot < 0.996) consistent = false;
+                            }
+                        }
+                        if (consistent) area.seatGrid = restoredSeatGrid;
+                        else console.warn(`Área ${areaId}: seatGrid no concuerda con polígono → se recomputa desde puntos.`);
+                    }
                     if (groupId) area.groupId = groupId;
                     AppState.areas.push(area);
                 } else {
